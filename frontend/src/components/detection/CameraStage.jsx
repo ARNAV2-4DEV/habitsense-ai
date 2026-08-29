@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { FACE_REGIONS, hairlineRegionPoints, findNearestContact } from '../../lib/featureExtraction'
+import { scheduleVideoFrameLoop, cancelVideoFrameLoop } from '../../lib/videoFrameLoop'
 
 // Every mesh landmark index the classifier actually reads across all named
 // regions (mouth, cheeks, jaw, eyebrows/forehead, nose) -- deduped so each
@@ -195,15 +196,19 @@ export default function CameraStage({ videoRef, faceRef, handsRef, poseRef, stat
           }
         }
       }
-      raf = requestAnimationFrame(draw)
+      raf = scheduleVideoFrameLoop(video, draw)
     }
-    raf = requestAnimationFrame(draw)
-    return () => cancelAnimationFrame(raf)
+    raf = scheduleVideoFrameLoop(videoRef.current, draw)
+    return () => cancelVideoFrameLoop(raf)
     // videoRef/faceRef/handsRef/poseRef are refs -- stable across renders --
-    // so this effect runs once and the loop free-runs at full rAF rate,
-    // completely decoupled from parent re-renders. Deliberately NOT
-    // depending on statusColor (mirrored into colorRef above instead) for
-    // the same reason.
+    // so this effect runs once and the loop free-runs, completely decoupled
+    // from parent re-renders. Frame-synced via requestVideoFrameCallback
+    // where available (see lib/videoFrameLoop.js) -- the underlying
+    // face/hand/pose refs only change once per real camera frame, so
+    // redrawing at the display's refresh rate instead just re-traces the
+    // same mesh/skeleton paths and reruns the nearest-contact search for no
+    // new data. Deliberately NOT depending on statusColor (mirrored into
+    // colorRef above instead) for the same reason.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoRef, faceRef, handsRef, poseRef])
 
