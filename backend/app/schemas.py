@@ -55,3 +55,8 @@ class EventCreate(BaseModel):
 
 class EventDismiss(BaseModel):
     event_id: str
+
+
+class EventNoteUpdate(BaseModel):
+    event_id: str
+    notes: str

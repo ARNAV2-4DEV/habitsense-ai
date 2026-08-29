@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { loadDetectors, detectFrame } from '../lib/mediapipeSetup'
 import { createFeatureExtractor } from '../lib/featureExtraction'
+import { requestConsent } from '../lib/consent'
 
 const SAMPLE_INTERVAL_MS = 140 // ~7 samples/sec while recording a burst
 
@@ -12,15 +13,20 @@ export function useCalibrationCapture() {
   const recordingRef = useRef(false)
   const collectedRef = useRef([])
   const lastSampleRef = useRef(0)
+  // Refs, not state -- same reasoning as useDetectionEngine.js: these only
+  // feed CameraStage's own imperative canvas draw loop, which reads them
+  // via ref, so mutating them here must never trigger a page re-render.
+  const lastFaceRef = useRef(null)
+  const lastHandsRef = useRef(null)
 
   const [ready, setReady] = useState(false)
   const [loadingMsg, setLoadingMsg] = useState(null)
   const [error, setError] = useState(null)
-  const [lastFace, setLastFace] = useState(null)
-  const [lastHands, setLastHands] = useState(null)
 
   const start = useCallback(async () => {
     setError(null)
+    const consented = await requestConsent('camera')
+    if (!consented) return
     try {
       setLoadingMsg('Requesting camera…')
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -59,8 +65,8 @@ export function useCalibrationCapture() {
       if (video && faceLandmarker && handLandmarker && video.readyState >= 2) {
         const now = performance.now()
         const { face, hands } = detectFrame(faceLandmarker, handLandmarker, video, now)
-        setLastFace(face)
-        setLastHands(hands)
+        lastFaceRef.current = face
+        lastHandsRef.current = hands
         const vec = extractorRef.current.extract(face, hands, now / 1000)
 
         if (recordingRef.current && now - lastSampleRef.current > SAMPLE_INTERVAL_MS) {
@@ -93,7 +99,7 @@ export function useCalibrationCapture() {
     ready,
     loadingMsg,
     error,
-    lastFace,
-    lastHands,
+    lastFaceRef,
+    lastHandsRef,
   }
 }

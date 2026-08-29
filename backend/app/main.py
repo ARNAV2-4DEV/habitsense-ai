@@ -4,7 +4,7 @@ from sqlalchemy import inspect, text
 
 from .database import Base, engine
 from . import models  # noqa: F401  (registers tables on Base.metadata)
-from .routers import detect, calibration, sessions, analytics
+from .routers import detect, calibration, sessions, analytics, export
 from .ml.classifier import get_classifier, get_prior_model
 
 Base.metadata.create_all(bind=engine)
@@ -22,7 +22,19 @@ def _ensure_calibration_variant_column():
             conn.execute(text("ALTER TABLE calibration_samples ADD COLUMN variant VARCHAR"))
 
 
+def _ensure_events_notes_column():
+    # events predates the Phase 6 trigger-notes field -- add it in place for
+    # the same reason as the variant column above (don't drop/recreate and
+    # lose anyone's already-logged sessions/events).
+    inspector = inspect(engine)
+    columns = [c["name"] for c in inspector.get_columns("events")]
+    if "notes" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE events ADD COLUMN notes VARCHAR"))
+
+
 _ensure_calibration_variant_column()
+_ensure_events_notes_column()
 
 app = FastAPI(
     title="HabitSense AI Backend",
@@ -37,7 +49,10 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=[
+        "http://localhost:5173", "http://127.0.0.1:5173",
+        "http://localhost:5174", "http://127.0.0.1:5174",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -47,6 +62,7 @@ app.include_router(detect.router)
 app.include_router(calibration.router)
 app.include_router(sessions.router)
 app.include_router(analytics.router)
+app.include_router(export.router)
 
 
 @app.on_event("startup")

@@ -1,4 +1,5 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
+import { motion } from 'framer-motion'
 import { Radar, Gauge, Fingerprint, SlidersHorizontal, Info, Sparkles } from 'lucide-react'
 import { useStore } from '../../state/store'
 
@@ -14,6 +15,8 @@ const links = [
 export default function Sidebar() {
   const isDetecting = useStore((s) => s.isDetecting)
   const backendOnline = useStore((s) => s.backendOnline)
+  const { pathname } = useLocation()
+  const activeTo = links.find((l) => (l.end ? pathname === l.to : pathname.startsWith(l.to)))?.to
 
   return (
     <aside className="hidden md:flex md:flex-col w-60 shrink-0 border-r border-white/[0.06] bg-ink-900/60 backdrop-blur-xl px-4 py-6">
@@ -32,15 +35,20 @@ export default function Sidebar() {
             to={to}
             end={end}
             className={({ isActive }) =>
-              `group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors ${
-                isActive
-                  ? 'bg-white/[0.07] text-white'
-                  : 'text-white/55 hover:text-white hover:bg-white/[0.04]'
+              `relative group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors ${
+                isActive ? 'text-white' : 'text-white/55 hover:text-white hover:bg-white/[0.04]'
               }`
             }
           >
-            <Icon size={17} strokeWidth={1.75} />
-            {label}
+            {to === activeTo && (
+              <motion.div
+                layoutId="sidebar-active-pill"
+                className="absolute inset-0 rounded-xl bg-white/[0.07]"
+                transition={{ type: 'spring', stiffness: 380, damping: 32 }}
+              />
+            )}
+            <Icon size={17} strokeWidth={1.75} className="relative" />
+            <span className="relative">{label}</span>
           </NavLink>
         ))}
       </nav>

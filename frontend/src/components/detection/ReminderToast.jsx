@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { HandMetal, ScanFace, Hand, Smile, X } from 'lucide-react'
+import { HandMetal, ScanFace, Hand, Smile, PersonStanding, Volume2, X } from 'lucide-react'
 import { useStore } from '../../state/store'
 import { playGentleChime } from '../../lib/chime'
 
@@ -13,6 +13,10 @@ const COPY = {
   eye_rubbing: { icon: ScanFace, text: 'Your hand has been at your eye for a while.' },
   skin_picking: { icon: Hand, text: "Looks like you've been picking at your skin for a bit." },
   chewing: { icon: HandMetal, text: "Looks like you've been chewing on something for a while." },
+  chin_resting: { icon: Hand, text: "You've been resting your chin/cheek in your hand for a while." },
+  posture_slouching: { icon: PersonStanding, text: 'Your posture has drifted from how you started this session.' },
+  teeth_grinding: { icon: Volume2, text: 'Sounds like sustained teeth grinding.' },
+  knuckle_cracking: { icon: Volume2, text: 'Heard a knuckle crack.' },
 }
 
 export default function ReminderToast() {
@@ -56,13 +60,14 @@ export default function ReminderToast() {
               Just noticing — no judgment. It'll clear on its own once your hand moves away.
             </div>
           </div>
-          <button
+          <motion.button
             onClick={clearActiveReminder}
+            whileTap={{ scale: 0.85 }}
             className="text-white/30 hover:text-white/70 transition-colors mt-0.5"
             aria-label="Dismiss"
           >
             <X size={15} />
-          </button>
+          </motion.button>
         </motion.div>
       )}
     </AnimatePresence>

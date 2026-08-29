@@ -36,14 +36,41 @@ function drawPath(ctx, points, idxList, w, h, close = true) {
   ctx.stroke()
 }
 
-export default function CameraStage({ videoRef, face, hands, statusColor = '#5ee7c8' }) {
+// BlazePose indices this overlay draws -- see lib/postureFeatures.js for why
+// only these four points (the ones the slouch heuristic actually reads).
+const POSE_LEFT_SHOULDER = 11
+const POSE_RIGHT_SHOULDER = 12
+const POSE_LEFT_EAR = 7
+const POSE_RIGHT_EAR = 8
+
+// face/hands/pose arrive as refs, not values: they're mutated on every
+// video frame (up to 60x/sec) by the detection loop, and this component's
+// own draw loop below reads the current value each tick via ref rather than
+// depending on them as props. That's the whole point -- if the parent
+// passed these as plain values, every mutation would force a React
+// re-render of the entire page (including the AuraOrb canvas) just to
+// re-run this component's *own* rAF loop, which needs no React involvement
+// at all. See useDetectionEngine.js/useCalibrationCapture.js for the refs.
+export default function CameraStage({ videoRef, faceRef, handsRef, poseRef, statusColor = '#5ee7c8', light = false, fps = null }) {
   const canvasRef = useRef(null)
+  const colorRef = useRef(statusColor)
+
+  // statusColor still arrives as a normal prop (it only changes a few times
+  // a second on real classification changes, not per-frame) -- mirrored
+  // into a ref so updating it doesn't restart the draw loop's effect either.
+  useEffect(() => {
+    colorRef.current = statusColor
+  }, [statusColor])
 
   useEffect(() => {
     let raf
     const draw = () => {
       const canvas = canvasRef.current
       const video = videoRef.current
+      const face = faceRef.current
+      const hands = handsRef.current
+      const pose = poseRef?.current
+      const statusColor = colorRef.current
       if (canvas && video && video.videoWidth) {
         if (canvas.width !== video.videoWidth) canvas.width = video.videoWidth
         if (canvas.height !== video.videoHeight) canvas.height = video.videoHeight
@@ -84,6 +111,31 @@ export default function CameraStage({ videoRef, face, hands, statusColor = '#5ee
             ctx.stroke()
           })
           ctx.setLineDash([])
+        }
+
+        if (pose) {
+          const ls = pose[POSE_LEFT_SHOULDER]
+          const rs = pose[POSE_RIGHT_SHOULDER]
+          const le = pose[POSE_LEFT_EAR]
+          const re = pose[POSE_RIGHT_EAR]
+          if (ls && rs && le && re) {
+            ctx.strokeStyle = 'rgba(124,156,245,0.5)'
+            ctx.lineWidth = 1.4
+            ctx.setLineDash([3, 3])
+            ;[[ls, rs], [ls, le], [rs, re]].forEach(([a, b]) => {
+              ctx.beginPath()
+              ctx.moveTo(a.x * w, a.y * h)
+              ctx.lineTo(b.x * w, b.y * h)
+              ctx.stroke()
+            })
+            ctx.setLineDash([])
+            ctx.fillStyle = 'rgba(124,156,245,0.7)'
+            ;[ls, rs, le, re].forEach((p) => {
+              ctx.beginPath()
+              ctx.arc(p.x * w, p.y * h, 3, 0, Math.PI * 2)
+              ctx.fill()
+            })
+          }
         }
 
         if (hands) {
@@ -130,10 +182,22 @@ export default function CameraStage({ videoRef, face, hands, statusColor = '#5ee
     }
     raf = requestAnimationFrame(draw)
     return () => cancelAnimationFrame(raf)
-  }, [videoRef, face, hands, statusColor])
+    // videoRef/faceRef/handsRef/poseRef are refs -- stable across renders --
+    // so this effect runs once and the loop free-runs at full rAF rate,
+    // completely decoupled from parent re-renders. Deliberately NOT
+    // depending on statusColor (mirrored into colorRef above instead) for
+    // the same reason.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoRef, faceRef, handsRef, poseRef])
 
   return (
-    <div className="relative w-full aspect-[4/3] max-w-xl mx-auto rounded-3xl overflow-hidden border border-white/10 bg-black">
+    <div
+      className={
+        light
+          ? 'relative w-full aspect-[4/3] rounded-[1.25rem] overflow-hidden border border-[#233b35]/15 bg-[#dbe3da]'
+          : 'relative w-full aspect-[4/3] rounded-3xl overflow-hidden border border-white/10 bg-black'
+      }
+    >
       <video
         ref={videoRef}
         className="w-full h-full object-cover -scale-x-100"
@@ -144,8 +208,14 @@ export default function CameraStage({ videoRef, face, hands, statusColor = '#5ee
         ref={canvasRef}
         className="absolute inset-0 w-full h-full -scale-x-100"
       />
+      {light && (
+        <div className="absolute left-4 top-4 flex items-center gap-2 rounded-full bg-[#f4f1e9]/75 px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-[.12em] text-[#50766d]">
+          <span className="h-1.5 w-1.5 rounded-full bg-[#70a999]" />
+          Local landmarks active{fps != null ? ` · ${fps} fps` : ''}
+        </div>
+      )}
       <div
-        className="pointer-events-none absolute inset-0 rounded-3xl transition-shadow duration-500"
+        className={`pointer-events-none absolute inset-0 transition-shadow duration-500 ${light ? 'rounded-[1.25rem]' : 'rounded-3xl'}`}
         style={{ boxShadow: `inset 0 0 60px -10px ${statusColor}55` }}
       />
     </div>

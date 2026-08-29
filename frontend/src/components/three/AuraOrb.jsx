@@ -3,14 +3,18 @@ import { Canvas, useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { useStore } from '../../state/store'
 
-const STATE_COLORS = {
-  none: new THREE.Color('#5ee7c8'),
-  nail_biting: new THREE.Color('#f5647c'),
-  hair_pulling: new THREE.Color('#f5647c'),
-  face_touching: new THREE.Color('#f5a35e'),
-  lip_biting: new THREE.Color('#f5a35e'),
-  watching: new THREE.Color('#7c9cf5'),
+// Default (dark-theme) palette -- untouched, still what Home.jsx renders.
+// Live.jsx passes its own `palette` prop (see components/ui palette maps) so
+// its paper-theme redesign doesn't recolor Home's orb too.
+const DEFAULT_PALETTE_HEX = {
+  none: '#5ee7c8',
+  nail_biting: '#f5647c',
+  hair_pulling: '#f5647c',
+  face_touching: '#f5a35e',
+  lip_biting: '#f5a35e',
+  watching: '#7c9cf5',
 }
+const DEFAULT_PARTICLE_COLOR = '#5ee7c8'
 
 const VERTEX = /* glsl */ `
   uniform float uTime;
@@ -53,17 +57,25 @@ const FRAGMENT = /* glsl */ `
   }
 `
 
-function Orb() {
+function Orb({ paletteHex }) {
   const meshRef = useRef()
   const materialRef = useRef()
-  const targetColor = useRef(new THREE.Color('#5ee7c8'))
+  const targetColor = useRef(new THREE.Color(paletteHex.none))
+
+  // Rebuilt only when the palette prop reference changes (Live.jsx defines
+  // its palette as a module-level constant, so this is effectively once).
+  const stateColors = useMemo(
+    () => Object.fromEntries(Object.entries(paletteHex).map(([k, hex]) => [k, new THREE.Color(hex)])),
+    [paletteHex]
+  )
 
   const uniforms = useMemo(
     () => ({
       uTime: { value: 0 },
-      uColor: { value: new THREE.Color('#5ee7c8') },
+      uColor: { value: new THREE.Color(paletteHex.none) },
       uEnergy: { value: 0.15 },
     }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   )
 
@@ -72,7 +84,7 @@ function Orb() {
     uniforms.uTime.value += delta
 
     const key = isDetecting ? currentLabel || 'none' : 'watching'
-    const desired = STATE_COLORS[key] || STATE_COLORS.none
+    const desired = stateColors[key] || stateColors.none
     targetColor.current.lerp(desired, 0.04)
     uniforms.uColor.value.copy(targetColor.current)
 
@@ -101,7 +113,7 @@ function Orb() {
   )
 }
 
-function Particles() {
+function Particles({ color }) {
   const pointsRef = useRef()
   const count = 260
   const positions = useMemo(() => {
@@ -126,19 +138,20 @@ function Particles() {
       <bufferGeometry>
         <bufferAttribute attach="attributes-position" args={[positions, 3]} />
       </bufferGeometry>
-      <pointsMaterial size={0.02} color="#5ee7c8" transparent opacity={0.35} sizeAttenuation />
+      <pointsMaterial size={0.02} color={color} transparent opacity={0.35} sizeAttenuation />
     </points>
   )
 }
 
-export default function AuraOrb({ className = '' }) {
+export default function AuraOrb({ className = '', palette, particleColor = DEFAULT_PARTICLE_COLOR }) {
+  const paletteHex = palette || DEFAULT_PALETTE_HEX
   return (
     <div className={className}>
       <Canvas camera={{ position: [0, 0, 5], fov: 45 }} gl={{ antialias: true, alpha: true }}>
         <ambientLight intensity={0.6} />
         <pointLight position={[3, 3, 3]} intensity={0.8} />
-        <Orb />
-        <Particles />
+        <Orb paletteHex={paletteHex} />
+        <Particles color={particleColor} />
       </Canvas>
     </div>
   )

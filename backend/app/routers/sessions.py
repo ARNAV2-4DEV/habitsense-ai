@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import DetectionSession, DetectionEvent
-from ..schemas import SessionCreate, SessionEnd, EventCreate, EventDismiss
+from ..schemas import SessionCreate, SessionEnd, EventCreate, EventDismiss, EventNoteUpdate
 from .detect import _SESSION_STATE
 
 router = APIRouter(tags=["sessions"])
@@ -82,5 +82,17 @@ def dismiss_event(payload: EventDismiss, db: Session = Depends(get_db)):
     if not row:
         raise HTTPException(404, "event not found")
     row.dismissed = True
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/events/note")
+def set_event_note(payload: EventNoteUpdate, db: Session = Depends(get_db)):
+    """Phase 6: attach a free-text trigger note -- 'what was happening right
+    before this' -- to an already-logged event."""
+    row = db.query(DetectionEvent).filter_by(id=payload.event_id).first()
+    if not row:
+        raise HTTPException(404, "event not found")
+    row.notes = payload.notes
     db.commit()
     return {"ok": True}

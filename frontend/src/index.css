@@ -21,6 +21,21 @@ body {
   background-color: rgba(94, 231, 200, 0.25);
 }
 
+/* browsers default <button> to cursor:default, not pointer -- fix it globally
+   rather than remembering cursor-pointer on every clickable element */
+button:not(:disabled), [role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+button:disabled, [aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+:focus-visible {
+  outline: 2px solid rgba(94, 231, 200, 0.7);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 /* subtle film-grain overlay so flat dark panels don't look like default AI-slop gradients */
 .grain-overlay {
   position: fixed;
@@ -30,6 +45,25 @@ body {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
   mix-blend-mode: overlay;
 }
+
+/* Barely-perceptible ambient drift for the paper-theme background (see
+   PaperAmbientField.jsx, used by Live/Calibrate/Settings/About/Dashboard) --
+   thin drifting outline shapes, matching the design reference's AmbientField.
+   Pure CSS transform keyframes -- no JS/rAF -- so it costs nothing on Live
+   and Calibrate, which run MediaPipe inference continuously while mounted.
+   Two different durations/directions so the pair never moves in lockstep. */
+@keyframes paper-field-a-drift {
+  0%, 100% { transform: translate(0, 0); }
+  33% { transform: translate(6%, -4%); }
+  66% { transform: translate(-3%, 3%); }
+}
+@keyframes paper-field-b-drift {
+  0%, 100% { transform: translate(0, 0); }
+  33% { transform: translate(-8%, 5%); }
+  66% { transform: translate(5%, -3%); }
+}
+.paper-field-a { animation: paper-field-a-drift 26s ease-in-out infinite; will-change: transform; }
+.paper-field-b { animation: paper-field-b-drift 32s ease-in-out infinite; will-change: transform; }
 
 .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
 .scrollbar-thin::-webkit-scrollbar-thumb { background: #2a3049; border-radius: 999px; }
@@ -41,5 +75,61 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* shadcn/ui CSS-variable tokens, mapped to the ink/aura palette above --
+   this app is dark-only (no light variant), so :root carries the values
+   directly rather than duplicating them under a separate .dark block. */
+:root {
+  --background: #06070a;
+  --foreground: #ffffff;
+  --card: #0e111a;
+  --card-foreground: #ffffff;
+  --popover: #0e111a;
+  --popover-foreground: #ffffff;
+  --primary: #5ee7c8;
+  --primary-foreground: #06070a;
+  --secondary: #141826;
+  --secondary-foreground: #ffffff;
+  --muted: #141826;
+  --muted-foreground: rgba(255, 255, 255, 0.5);
+  --accent: #7c9cf5;
+  --accent-foreground: #06070a;
+  --destructive: #f5647c;
+  --destructive-foreground: #ffffff;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.08);
+  --ring: #5ee7c8;
+  --radius: 1rem;
+  --radius-sm: calc(var(--radius) - 6px);
+  --radius-md: calc(var(--radius) - 4px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --chart-1: #5ee7c8;
+  --chart-2: #7c9cf5;
+  --chart-3: #f5a35e;
+  --chart-4: #f5647c;
+  --chart-5: #c85ef5;
+  --sidebar: #0a0c12;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #5ee7c8;
+  --sidebar-primary-foreground: #06070a;
+  --sidebar-accent: rgba(255, 255, 255, 0.07);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.06);
+  --sidebar-ring: #5ee7c8;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+    outline-color: color-mix(in srgb, var(--ring) 50%, transparent);
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
   }
 }

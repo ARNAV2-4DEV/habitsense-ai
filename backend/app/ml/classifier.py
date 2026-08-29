@@ -48,6 +48,7 @@ HABIT_CONFIDENCE = {
     "eye_rubbing": "high",      # hand + eye-region proximity: strong geometric signal
     "skin_picking": "high",     # face_touching's region signal plus a distinct pinch-grip cue
     "chewing": "moderate",      # coarser mouth-contact pattern -- no isolated-finger signature to anchor on
+    "chin_resting": "moderate", # static posture, not a compulsive habit -- see HABIT_CATEGORY in the frontend store
     "none": "n/a",
 }
 

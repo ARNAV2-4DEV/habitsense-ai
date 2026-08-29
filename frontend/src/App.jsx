@@ -3,6 +3,8 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useLocation } from 'react-router-dom'
 import Sidebar from './components/layout/Sidebar'
 import MobileNav from './components/layout/MobileNav'
+import ConsentModal from './components/ConsentModal'
+import { useLenis } from './hooks/useLenis'
 import Home from './pages/Home'
 import Live from './pages/Live'
 import Calibrate from './pages/Calibrate'
@@ -25,6 +27,7 @@ function PageTransition({ children }) {
 
 export default function App() {
   const location = useLocation()
+  useLenis()
 
   return (
     <div className="min-h-screen flex bg-ink-950 text-white">
@@ -43,6 +46,7 @@ export default function App() {
         </AnimatePresence>
       </main>
       <MobileNav />
+      <ConsentModal />
     </div>
   )
 }

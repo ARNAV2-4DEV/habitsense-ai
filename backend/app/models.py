@@ -41,6 +41,7 @@ class DetectionEvent(Base):
     ended_at = Column(Float, nullable=True)
     duration_sec = Column(Float, nullable=True)
     dismissed = Column(Boolean, default=False)  # user marked "not actually me"
+    notes = Column(String, nullable=True)  # Phase 6: "what was happening right before this"
 
     session = relationship("DetectionSession", back_populates="events")
 

@@ -29,6 +29,7 @@ const EXPECTED_REGION_GROUPS = {
   eye_rubbing: ['eye'],
   skin_picking: ['cheek', 'jaw'],
   chewing: ['mouth'],
+  chin_resting: ['jaw', 'cheek'],
 }
 
 const IDX = Object.fromEntries(FEATURE_NAMES.map((name, i) => [name, i]))

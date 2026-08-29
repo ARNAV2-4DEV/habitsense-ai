@@ -14,6 +14,7 @@ import {
   FilesetResolver,
   FaceLandmarker,
   HandLandmarker,
+  PoseLandmarker,
 } from '@mediapipe/tasks-vision'
 
 const WASM_BASE =
@@ -25,27 +26,60 @@ const FACE_MODEL_URL =
 const HAND_MODEL_URL =
   'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'
 
+// "Lite" variant deliberately: posture (Phase 4) is an opt-in, off-by-default
+// feature layered on top of the core face/hand pipeline, so it shouldn't add
+// a heavy model load for the majority of people who leave it off.
+const POSE_MODEL_URL =
+  'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task'
+
 let visionFileset = null
+
+// tasks-vision doesn't expose a "which delegate actually got used" getter on
+// the created landmarker, so the only way to confirm GPU vs. silent CPU
+// fallback is to watch whether creation with delegate:'GPU' throws. It does
+// throw (rather than silently downgrading) when GPU init genuinely fails,
+// so this also doubles as a real safety net -- without it, a GPU init
+// failure would previously take down the whole app instead of degrading.
+async function createWithDelegateFallback(create, label) {
+  try {
+    const instance = await create('GPU')
+    console.info(`[mediapipe] ${label}: GPU delegate active`)
+    return instance
+  } catch (err) {
+    console.warn(`[mediapipe] ${label}: GPU delegate failed, falling back to CPU`, err)
+    const instance = await create('CPU')
+    console.info(`[mediapipe] ${label}: CPU delegate active`)
+    return instance
+  }
+}
 
 export async function loadDetectors({ onProgress } = {}) {
   onProgress?.('Loading vision runtime…')
   visionFileset = visionFileset || (await FilesetResolver.forVisionTasks(WASM_BASE))
 
   onProgress?.('Loading face landmark model…')
-  const faceLandmarker = await FaceLandmarker.createFromOptions(visionFileset, {
-    baseOptions: { modelAssetPath: FACE_MODEL_URL, delegate: 'GPU' },
-    runningMode: 'VIDEO',
-    numFaces: 1,
-    outputFaceBlendshapes: false,
-    outputFacialTransformationMatrixes: false,
-  })
+  const faceLandmarker = await createWithDelegateFallback(
+    (delegate) =>
+      FaceLandmarker.createFromOptions(visionFileset, {
+        baseOptions: { modelAssetPath: FACE_MODEL_URL, delegate },
+        runningMode: 'VIDEO',
+        numFaces: 1,
+        outputFaceBlendshapes: false,
+        outputFacialTransformationMatrixes: false,
+      }),
+    'FaceLandmarker'
+  )
 
   onProgress?.('Loading hand landmark model…')
-  const handLandmarker = await HandLandmarker.createFromOptions(visionFileset, {
-    baseOptions: { modelAssetPath: HAND_MODEL_URL, delegate: 'GPU' },
-    runningMode: 'VIDEO',
-    numHands: 2,
-  })
+  const handLandmarker = await createWithDelegateFallback(
+    (delegate) =>
+      HandLandmarker.createFromOptions(visionFileset, {
+        baseOptions: { modelAssetPath: HAND_MODEL_URL, delegate },
+        runningMode: 'VIDEO',
+        numHands: 2,
+      }),
+    'HandLandmarker'
+  )
 
   onProgress?.('Ready')
   return { faceLandmarker, handLandmarker }
@@ -70,4 +104,40 @@ export function detectFrame(faceLandmarker, handLandmarker, videoEl, timestampMs
   )
 
   return { face, hands, handedness: handResult.handedness || [] }
+}
+
+/**
+ * Lazily loads MediaPipe's PoseLandmarker (33-point body skeleton) -- only
+ * called when a person opts into Phase 4 posture detection, so the model
+ * download/init cost is never paid by someone who leaves that feature off.
+ */
+let poseLandmarkerPromise = null
+
+export async function loadPoseLandmarker({ onProgress } = {}) {
+  if (!poseLandmarkerPromise) {
+    poseLandmarkerPromise = (async () => {
+      onProgress?.('Loading vision runtime…')
+      visionFileset = visionFileset || (await FilesetResolver.forVisionTasks(WASM_BASE))
+      onProgress?.('Loading posture model…')
+      return createWithDelegateFallback(
+        (delegate) =>
+          PoseLandmarker.createFromOptions(visionFileset, {
+            baseOptions: { modelAssetPath: POSE_MODEL_URL, delegate },
+            runningMode: 'VIDEO',
+            numPoses: 1,
+          }),
+        'PoseLandmarker'
+      )
+    })()
+  }
+  return poseLandmarkerPromise
+}
+
+export function detectPose(poseLandmarker, videoEl, timestampMs) {
+  const result = poseLandmarker.detectForVideo(videoEl, timestampMs)
+  const pose =
+    result.landmarks && result.landmarks.length > 0
+      ? result.landmarks[0].map((p) => ({ x: p.x, y: p.y, z: p.z || 0, visibility: p.visibility ?? 1 }))
+      : null
+  return { pose }
 }

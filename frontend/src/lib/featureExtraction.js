@@ -408,6 +408,12 @@ export function heuristicGuess(vec) {
     if (f('pinch_grip_score') > 0.6) {
       return { label: 'skin_picking', confidence: 0.45 }
     }
+    // Static, sustained contact with near-zero hand movement reads as a
+    // resting posture (chin/cheek-in-hand) rather than an active touch --
+    // see Phase 4 in the expansion plan.
+    if (f('hand_velocity_norm') < 0.1 && f('dwell_time_norm') > 0.5) {
+      return { label: 'chin_resting', confidence: 0.45 }
+    }
     return { label: 'face_touching', confidence: 0.45 }
   }
   return { label: 'none', confidence: 0.6 }

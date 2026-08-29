@@ -36,7 +36,7 @@ from . import landmarks as L
 
 HABITS = [
     "none", "nail_biting", "hair_pulling", "face_touching", "lip_biting",
-    "nose_picking", "eye_rubbing", "skin_picking", "chewing",
+    "nose_picking", "eye_rubbing", "skin_picking", "chewing", "chin_resting",
 ]
 
 IDX = {name: i for i, name in enumerate(FEATURE_NAMES)}
@@ -332,6 +332,44 @@ def _sample_chewing():
     return v
 
 
+def _sample_chin_resting():
+    """Plan Phase 4: chin/cheek-resting, modeled as documented -- 'a static
+    low-velocity face-touch variant.' Same region family as face_touching
+    (jaw/chin most often, since that's where a resting palm or knuckles
+    naturally lands), but distinguished by near-zero wrist velocity and a
+    much longer sustained dwell than an active touch, picking, or pulling
+    motion ever shows. Flagged 'posture', not a BFRB, in the UI -- see
+    HABIT_CATEGORY in state/store.js -- since resting your chin on your hand
+    isn't compulsive/self-injurious the way the other habits are."""
+    v = _base_vector()
+    v[IDX["min_fingertip_to_mouth_dist"]] = _noisy(0.35, 0.25, 0.0, 0.8)
+    v[IDX["min_fingertip_to_hairline_dist"]] = _noisy(0.55, 0.2, 0.15, 0.95)
+    v[IDX["min_fingertip_to_face_dist"]] = _noisy(0.15, 0.09, 0.0, 0.3)
+    v[IDX["hand_above_forehead"]] = 0.0
+    v[IDX["hand_height_norm"]] = _noisy(0.55, 0.15, 0.3, 0.85)
+    v[IDX["mouth_compression_ratio"]] = _noisy(0.2, 0.1)
+    v[IDX["mouth_asymmetry"]] = _noisy(0.08, 0.06)
+    # A resting hand/palm is characteristically relaxed -- not curled into a
+    # fist the way nail_biting or nose_picking are, and not isolated to one
+    # finger the way an active pinch or point is.
+    v[IDX["finger_curl_score"]] = _noisy(0.25, 0.15)
+    v[IDX["thumb_or_index_isolated"]] = 0.0
+    v[IDX["pinch_grip_score"]] = _noisy(0.1, 0.1, 0.0, 0.35)
+    # The defining signal: this is a STATIC posture, not an active motion --
+    # velocity near zero and dwell time near the cap, unlike every other
+    # hand-based habit above which involves ongoing small adjustments.
+    v[IDX["hand_velocity_norm"]] = _noisy(0.04, 0.05, 0.0, 0.15)
+    v[IDX["dwell_time_norm"]] = _noisy(0.75, 0.2, 0.4, 1.0)
+    v[IDX["head_tilt_norm"]] = _noisy(0.3, 0.15)
+    v[IDX["num_hands_present"]] = random.choice([0.5, 1.0])
+    v[IDX["hand_face_overlap"]] = 1.0
+    # chin/cheek resting: jaw most common (classic "hand under chin"), cheek
+    # also real (elbow-on-desk, cheek-in-palm)
+    _set_region(v, random.choice(["jaw", "jaw", "cheek"]), 0.09, 0.06, 0.0, 0.2)
+    _set_finger(v, None)
+    return v
+
+
 SAMPLERS = {
     "none": _sample_none,
     "nail_biting": _sample_nail_biting,
@@ -342,6 +380,7 @@ SAMPLERS = {
     "eye_rubbing": _sample_eye_rubbing,
     "skin_picking": _sample_skin_picking,
     "chewing": _sample_chewing,
+    "chin_resting": _sample_chin_resting,
 }
 
 

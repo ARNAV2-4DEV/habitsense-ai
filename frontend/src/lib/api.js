@@ -53,6 +53,12 @@ export const api = {
       body: JSON.stringify({ event_id: eventId }),
     }),
 
+  setEventNote: (eventId, notes) =>
+    request('/events/note', {
+      method: 'POST',
+      body: JSON.stringify({ event_id: eventId, notes }),
+    }),
+
   addCalibrationSample: (profileId, habit, featureVector, variant = null) =>
     request('/calibration/samples', {
       method: 'POST',
@@ -73,6 +79,9 @@ export const api = {
   modelStatus: (profileId) => request(`/calibration/status/${profileId}`),
 
   analyticsSummary: (profileId) => request(`/analytics/summary/${profileId}`),
+
+  // Not a JSON request -- the browser downloads this directly as a file.
+  exportUrl: (profileId, format) => `${BASE_URL}/export/${profileId}?format=${format}`,
 }
 
 export { BASE_URL }
