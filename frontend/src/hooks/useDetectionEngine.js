@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { loadDetectors, detectFrame, loadPoseLandmarker, detectPose } from '../lib/mediapipeSetup'
+import { createDetectionWorkerClient } from '../lib/detectionWorkerClient'
 import { createFeatureExtractor, heuristicGuess, FEATURE_NAMES } from '../lib/featureExtraction'
 import { createPostureMonitor } from '../lib/postureFeatures'
 import { createAudioMonitor } from '../lib/audioDetection'
@@ -14,7 +14,13 @@ export function useDetectionEngine() {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const rafRef = useRef(null)
-  const detectorsRef = useRef(null)
+  // Holds the MediaPipe worker client (see lib/detectionWorkerClient.js):
+  // face/hand/pose inference now runs on a dedicated worker thread instead
+  // of blocking this thread's rendering/animation work every frame. Kept in
+  // a ref (not reset on stop()) so restarting a session within the same
+  // page visit reuses the already-loaded models instead of paying init cost
+  // again -- same caching behavior the old detectorsRef had.
+  const workerRef = useRef(null)
   const extractorRef = useRef(createFeatureExtractor())
   const lastBackendCallRef = useRef(0)
   const openEventsRef = useRef({}) // habit -> { startedAt, maxConfidence }
@@ -38,8 +44,8 @@ export function useDetectionEngine() {
 
   // Phase 4 (posture) and Phase 5 (audio) -- both rule-based, both entirely
   // client-side, both driven through the exact same dwell/event machinery
-  // above via updateStreak() rather than a parallel system.
-  const poseLandmarkerRef = useRef(null)
+  // above via updateStreak() rather than a parallel system. Pose inference
+  // itself now happens inside the worker (see workerRef) alongside face/hand.
   const postureMonitorRef = useRef(createPostureMonitor())
   const audioMonitorRef = useRef(createAudioMonitor())
 
@@ -93,12 +99,15 @@ export function useDetectionEngine() {
         await videoRef.current.play()
       }
 
-      if (!detectorsRef.current) {
-        detectorsRef.current = await loadDetectors({ onProgress: setLoadingMsg })
+      if (!workerRef.current) {
+        workerRef.current = createDetectionWorkerClient()
+      }
+      if (!workerRef.current.ready) {
+        await workerRef.current.init({ onProgress: setLoadingMsg })
       }
 
-      if (useStore.getState().posture.enabled && !poseLandmarkerRef.current) {
-        poseLandmarkerRef.current = await loadPoseLandmarker({ onProgress: setLoadingMsg })
+      if (useStore.getState().posture.enabled && !workerRef.current.poseReady) {
+        await workerRef.current.initPose({ onProgress: setLoadingMsg })
       }
       postureMonitorRef.current.reset()
       setPostureStatus(null)
@@ -256,10 +265,10 @@ export function useDetectionEngine() {
     // Not async: the backend call below is intentionally fire-and-forget
     // (.then()/.catch(), never awaited) so a slow network response can
     // never delay the next frame.
-    const tick = () => {
+    const tick = async () => {
       const video = videoRef.current
-      const { faceLandmarker, handLandmarker } = detectorsRef.current || {}
-      if (!video || !faceLandmarker || !handLandmarker || video.readyState < 2) {
+      const worker = workerRef.current
+      if (!video || !worker || !worker.ready || video.readyState < 2) {
         // Plain rAF here, deliberately: requestVideoFrameCallback may not
         // fire at all before the video actually starts playing, which
         // would stall this readiness poll indefinitely. Once past this
@@ -289,19 +298,34 @@ export function useDetectionEngine() {
         }
       }
 
-      const { face, hands } = detectFrame(faceLandmarker, handLandmarker, video, now)
+      const postureCfg = useStore.getState().posture
+      const wantPose = postureCfg.enabled && worker.poseReady
+
+      // createImageBitmap is a cheap, hardware-accelerated frame copy (a
+      // few ms at most) -- unlike the inference it feeds, it's fine to do
+      // here, and transferring the bitmap (zero-copy) to the worker is what
+      // lets the actual detectForVideo calls run off this thread entirely.
+      let face, hands, pose
+      try {
+        const bitmap = await createImageBitmap(video)
+        ;({ face, hands, pose } = await worker.detect(bitmap, now, wantPose))
+      } catch {
+        // Frame capture/detection failed for this tick (e.g. a transient
+        // decode hiccup) -- skip it, same as the old code implicitly did
+        // whenever a frame wasn't ready; next scheduled tick just tries again.
+        rafRef.current = scheduleVideoFrameLoop(video, tick)
+        return
+      }
       lastFaceRef.current = face
       lastHandsRef.current = hands
 
       const localVec = extractorRef.current.extract(face, hands, now / 1000)
 
-      // Phase 4: posture, entirely local, driven off the same rAF cadence
-      // as face/hand tracking rather than the throttled backend poll below
-      // -- there's no backend model involved at all (see postureFeatures.js
+      // Phase 4: posture, entirely local, driven off the same cadence as
+      // face/hand tracking rather than the throttled backend poll below --
+      // there's no backend model involved at all (see postureFeatures.js
       // for why this stays a session-relative heuristic, not a classifier).
-      const postureCfg = useStore.getState().posture
-      if (postureCfg.enabled && poseLandmarkerRef.current) {
-        const { pose } = detectPose(poseLandmarkerRef.current, video, now)
+      if (wantPose) {
         lastPoseRef.current = pose
         const postureResult = postureMonitorRef.current.update(pose, now / 1000, postureCfg.sensitivity)
         // Only push to React state when the visible status actually changed
@@ -379,6 +403,7 @@ export function useDetectionEngine() {
   useEffect(() => {
     return () => {
       cancelVideoFrameLoop(rafRef.current)
+      workerRef.current?.terminate()
     }
   }, [])
 
