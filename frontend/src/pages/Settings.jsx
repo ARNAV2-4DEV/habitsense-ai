@@ -1,13 +1,22 @@
-import { Volume2, VolumeX, PersonStanding, Ear, Download, Clock3, Bell } from 'lucide-react'
+import { motion } from 'framer-motion'
 import { useStore, HABITS, HABIT_CATEGORY } from '../state/store'
+import { Volume2, VolumeX, Fingerprint, PersonStanding, Ear, Download } from 'lucide-react'
 import { requestConsent, revokeConsent } from '../lib/consent'
 import { api } from '../lib/api'
 import Toggle from '../components/ui/Toggle'
-import Panel from '../components/ui/Panel'
-import SectionLabel from '../components/ui/SectionLabel'
-import StatusBadge from '../components/ui/StatusBadge'
-import PaperAmbientField from '../components/ui/PaperAmbientField'
-import { STATUS_COLOR, LABELS } from '../lib/paperTheme'
+import AmbientGlow from '../components/ui/AmbientGlow'
+
+const HABIT_LABELS = {
+  nail_biting: 'Nail biting',
+  hair_pulling: 'Hair pulling',
+  face_touching: 'Face touching',
+  lip_biting: 'Lip biting',
+  nose_picking: 'Nose picking',
+  eye_rubbing: 'Eye rubbing',
+  skin_picking: 'Skin picking',
+  chewing: 'Chewing on objects',
+  chin_resting: 'Chin/cheek resting',
+}
 
 export default function Settings() {
   const profileId = useStore((s) => s.profileId)
@@ -47,244 +56,217 @@ export default function Settings() {
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#f4f1e9] text-[#182522]">
-      <PaperAmbientField />
-      <div className="relative max-w-6xl mx-auto px-6 md:px-10 py-10 md:py-14">
-        <div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-          <div>
-            <p className="mb-2 font-mono text-[10px] uppercase tracking-[.2em] text-[#6c958b]">Personal preferences</p>
-            <h1 className="font-display text-4xl tracking-[-.03em] text-[#1c3731] sm:text-5xl">Tune the noticing.</h1>
-            <p className="mt-3 max-w-xl text-sm leading-relaxed text-[#68756d]">
-              A lower sensitivity fires sooner; a longer minimum sustained time means only truly
-              sustained contact counts.
-            </p>
-          </div>
-          <StatusBadge tone="neutral">Saved locally</StatusBadge>
-        </div>
+    <div className="relative overflow-hidden">
+      <AmbientGlow />
+      <div className="relative max-w-3xl mx-auto px-6 md:px-10 py-10 md:py-14">
+        <h1 className="font-display text-3xl tracking-tight mb-1">Settings</h1>
+        <p className="text-white/45 text-sm mb-10">
+          Sensitivity and dwell time are per habit — a lower confidence threshold fires sooner,
+          a longer minimum dwell time means only truly sustained contact counts.
+        </p>
 
-        <div className="grid gap-7 xl:grid-cols-[minmax(0,1.5fr)_360px]">
-          <div>
-            <SectionLabel detail="touch-friendly controls">Habit sensitivity</SectionLabel>
-            <Panel className="overflow-hidden">
-              <div className="hidden grid-cols-[1.25fr_1fr_1fr_70px] gap-5 border-b border-[#233b35]/10 bg-white/30 px-5 py-3 font-mono text-[9px] uppercase tracking-[.14em] text-[#87918a] sm:grid">
-                <span>Habit</span>
-                <span>Sensitivity</span>
-                <span>Minimum sustained time</span>
-                <span className="text-right">Active</span>
+        <div className="space-y-4 mb-10">
+          {HABITS.map((habit, i) => (
+            <motion.div
+              key={habit}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35, delay: i * 0.04, ease: [0.16, 1, 0.3, 1] }}
+              className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <Fingerprint size={16} className="text-aura-calm" strokeWidth={1.75} />
+                  <span className="font-medium">{HABIT_LABELS[habit]}</span>
+                  {HABIT_CATEGORY[habit] === 'posture' && (
+                    <span className="text-[10px] uppercase tracking-wide text-aura-watch/80 border border-aura-watch/25 rounded-full px-2 py-0.5">
+                      posture
+                    </span>
+                  )}
+                </div>
+                <Toggle checked={enabledHabits[habit]} onChange={() => toggleHabit(habit)} />
               </div>
-              <div className="divide-y divide-[#233b35]/8">
-                {HABITS.map((habit) => (
-                  <div key={habit} className="grid gap-4 px-4 py-4 sm:grid-cols-[1.25fr_1fr_1fr_70px] sm:items-center sm:gap-5 sm:px-5">
-                    <div className="flex items-center gap-2.5">
-                      <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: STATUS_COLOR[habit] }} />
-                      <div>
-                        <p className="text-xs font-semibold text-[#43584f] flex items-center gap-1.5">
-                          {LABELS[habit]}
-                          {HABIT_CATEGORY[habit] === 'posture' && (
-                            <span className="text-[9px] uppercase tracking-wide text-[#6f9db7] border border-[#6f9db7]/30 rounded-full px-1.5 py-0.5">
-                              posture
-                            </span>
-                          )}
-                        </p>
-                        <p className="mt-0.5 font-mono text-[9px] uppercase tracking-[.1em] text-[#909992]">local signal</p>
-                      </div>
-                    </div>
 
-                    <label className={`block ${!enabledHabits[habit] ? 'opacity-40 pointer-events-none' : ''}`}>
-                      <span className="mb-1.5 flex items-center justify-between text-[11px] text-[#7d8981]">
-                        <span className="sm:hidden">Sensitivity</span>
-                        <span className="font-mono">{Math.round(thresholds[habit] * 100)}%</span>
-                      </span>
-                      <input
-                        type="range"
-                        min={0.15}
-                        max={0.9}
-                        step={0.01}
-                        value={thresholds[habit]}
-                        onChange={(e) => setThreshold(habit, parseFloat(e.target.value))}
-                        className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-[#d9e0d7] accent-[#39766b]"
-                      />
-                    </label>
-
-                    <label className={`block ${!enabledHabits[habit] ? 'opacity-40 pointer-events-none' : ''}`}>
-                      <span className="mb-1.5 flex items-center justify-between text-[11px] text-[#7d8981]">
-                        <span className="sm:hidden">Minimum sustained time</span>
-                        <span className="font-mono">{minDwellSeconds[habit].toFixed(1)}s</span>
-                      </span>
-                      <input
-                        type="range"
-                        min={0.5}
-                        max={4}
-                        step={0.1}
-                        value={minDwellSeconds[habit]}
-                        onChange={(e) => setMinDwell(habit, parseFloat(e.target.value))}
-                        className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-[#d9e0d7] accent-[#39766b]"
-                      />
-                    </label>
-
-                    <Toggle
-                      checked={enabledHabits[habit]}
-                      onChange={() => toggleHabit(habit)}
-                      activeClassName="bg-[#4c897c]"
-                      offClassName="bg-[#c5cec5]"
-                      className="justify-self-start sm:justify-self-end"
-                    />
+              <div className={`grid sm:grid-cols-2 gap-6 ${!enabledHabits[habit] ? 'opacity-40 pointer-events-none' : ''}`}>
+                <div>
+                  <div className="flex justify-between text-xs text-white/45 mb-2">
+                    <span>Sensitivity</span>
+                    <span className="font-mono">{Math.round(thresholds[habit] * 100)}%</span>
                   </div>
-                ))}
+                  <input
+                    type="range"
+                    min={0.15}
+                    max={0.9}
+                    step={0.01}
+                    value={thresholds[habit]}
+                    onChange={(e) => setThreshold(habit, parseFloat(e.target.value))}
+                    className="w-full accent-aura-calm"
+                  />
+                </div>
+                <div>
+                  <div className="flex justify-between text-xs text-white/45 mb-2">
+                    <span>Minimum sustained time</span>
+                    <span className="font-mono">{minDwellSeconds[habit].toFixed(1)}s</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={4}
+                    step={0.1}
+                    value={minDwellSeconds[habit]}
+                    onChange={(e) => setMinDwell(habit, parseFloat(e.target.value))}
+                    className="w-full accent-aura-calm"
+                  />
+                </div>
               </div>
-            </Panel>
-          </div>
-
-          <aside className="space-y-5">
-            <div>
-              <SectionLabel>Quiet preferences</SectionLabel>
-              <Panel className="divide-y divide-[#233b35]/8">
-                <button
-                  onClick={() => setSoundEnabled(!soundEnabled)}
-                  className="flex min-h-16 w-full items-center gap-3 px-5 text-left"
-                >
-                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#e7eee5] text-[#4c8276] shrink-0">
-                    {soundEnabled ? <Volume2 size={15} /> : <VolumeX size={15} />}
-                  </span>
-                  <span className="flex-1">
-                    <span className="block text-xs font-semibold text-[#43584f]">Sound on reminders</span>
-                    <span className="mt-1 block text-[11px] text-[#7b877f]">A soft two-note chime, not an alarm.</span>
-                  </span>
-                  <span className={`h-2 w-2 rounded-full shrink-0 ${soundEnabled ? 'bg-[#6ca294]' : 'bg-[#c4cbc3]'}`} />
-                </button>
-                <button
-                  onClick={() => setGentleMode(!gentleMode)}
-                  className="flex min-h-16 w-full items-center gap-3 px-5 text-left"
-                >
-                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#e7eee5] text-[#4c8276] shrink-0">
-                    <Bell size={15} />
-                  </span>
-                  <span className="flex-1">
-                    <span className="block text-xs font-semibold text-[#43584f]">Gentle mode</span>
-                    <span className="mt-1 block text-[11px] text-[#7b877f]">Softer toast styling, less visually assertive.</span>
-                  </span>
-                  <span className={`h-2 w-2 rounded-full shrink-0 ${gentleMode ? 'bg-[#6ca294]' : 'bg-[#c4cbc3]'}`} />
-                </button>
-              </Panel>
-            </div>
-
-            <Panel className="p-5">
-              <SectionLabel>Export your data</SectionLabel>
-              <p className="text-xs leading-relaxed text-[#748178] mb-4">
-                Every session, event, and calibration sample for this profile, straight from your
-                local database — no account, no server-side gating.
-              </p>
-              <div className="flex flex-wrap items-center gap-2">
-                <a
-                  href={api.exportUrl(profileId, 'json')}
-                  className="inline-flex min-h-9 items-center gap-2 rounded-full border border-[#233b35]/15 bg-white/50 px-3.5 text-xs font-medium text-[#48645b] hover:bg-white/80 transition-colors"
-                >
-                  <Download size={13} /> JSON
-                </a>
-                <a
-                  href={api.exportUrl(profileId, 'csv')}
-                  className="inline-flex min-h-9 items-center gap-2 rounded-full border border-[#233b35]/15 bg-white/50 px-3.5 text-xs font-medium text-[#48645b] hover:bg-white/80 transition-colors"
-                >
-                  <Download size={13} /> CSV (.zip)
-                </a>
-              </div>
-            </Panel>
-
-            <div className="flex items-start gap-3 rounded-xl border border-[#233b35]/10 bg-white/30 p-4 text-[11px] leading-relaxed text-[#77847c]">
-              <Clock3 size={15} className="mt-0.5 shrink-0 text-[#769c91]" />
-              Minimum sustained time is how long a pattern must remain present before it becomes a
-              logged event.
-            </div>
-          </aside>
+            </motion.div>
+          ))}
         </div>
 
-        <div className="mt-7">
-          <SectionLabel detail="off by default">Experimental</SectionLabel>
-          <div className="grid gap-5 sm:grid-cols-2">
-            <Panel className="p-5">
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-3">
-                  <PersonStanding size={16} className="text-[#6f9db7]" strokeWidth={1.75} />
-                  <div className="text-sm font-semibold text-[#28453c]">Posture</div>
+        <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5 mb-4">
+          <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center gap-3">
+              <PersonStanding size={16} className="text-aura-watch" strokeWidth={1.75} />
+              <div>
+                <div className="text-sm font-medium flex items-center gap-2">
+                  Posture
+                  <span className="text-[10px] uppercase tracking-wide text-aura-watch/80 border border-aura-watch/25 rounded-full px-2 py-0.5">
+                    experimental
+                  </span>
                 </div>
-                <Toggle checked={posture.enabled} onChange={handleTogglePosture} activeClassName="bg-[#6f9db7]" offClassName="bg-[#c5cec5]" />
+                <div className="text-xs text-white/40 max-w-sm">
+                  Not a compulsive habit — a rule-based check against how you were sitting a few
+                  seconds ago, using MediaPipe's body pose model. Also draws the full 33-point
+                  skeleton overlay on Live/Calibrate while it's on. Off by default.
+                </div>
               </div>
-              <p className="text-xs text-[#7b877f] leading-relaxed">
-                Not a compulsive habit — a rule-based check against how you were sitting a few
-                seconds ago, using MediaPipe's body pose model.
-              </p>
-              {posture.enabled && (
-                <div className="mt-4 pt-4 border-t border-[#233b35]/10">
-                  <label className="block">
-                    <span className="mb-1.5 flex items-center justify-between text-[11px] text-[#7d8981]">
-                      <span>Sensitivity</span>
-                      <span className="font-mono">{Math.round(posture.sensitivity * 100)}%</span>
-                    </span>
-                    <input
-                      type="range"
-                      min={0.1}
-                      max={0.9}
-                      step={0.05}
-                      value={posture.sensitivity}
-                      onChange={(e) => setPostureSensitivity(parseFloat(e.target.value))}
-                      className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-[#d9e0d7] accent-[#6f9db7]"
-                    />
-                  </label>
-                  <p className="text-[11px] text-[#8a948d] mt-3 leading-relaxed">
-                    A short baseline is captured at the start of each Live session — detection
-                    compares against that, not an absolute standard.
-                  </p>
+            </div>
+            <Toggle checked={posture.enabled} onChange={handleTogglePosture} activeClassName="bg-aura-watch" />
+          </div>
+          {posture.enabled && (
+            <div className="mt-4 grid sm:grid-cols-2 gap-6">
+              <div>
+                <div className="flex justify-between text-xs text-white/45 mb-2">
+                  <span>Sensitivity</span>
+                  <span className="font-mono">{Math.round(posture.sensitivity * 100)}%</span>
                 </div>
-              )}
-            </Panel>
+                <input
+                  type="range"
+                  min={0.1}
+                  max={0.9}
+                  step={0.05}
+                  value={posture.sensitivity}
+                  onChange={(e) => setPostureSensitivity(parseFloat(e.target.value))}
+                  className="w-full accent-aura-watch"
+                />
+              </div>
+              <p className="text-[11px] text-white/35 self-end leading-relaxed">
+                A short baseline is captured at the start of each Live session (sit normally for a
+                few seconds) — detection compares against that, not an absolute standard.
+              </p>
+            </div>
+          )}
+        </div>
 
-            <Panel className="p-5">
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-3">
-                  <Ear size={16} className="text-[#6f9db7]" strokeWidth={1.75} />
-                  <div className="text-sm font-semibold text-[#28453c]">Audio habits</div>
+        <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5 mb-10">
+          <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center gap-3">
+              <Ear size={16} className="text-aura-watch" strokeWidth={1.75} />
+              <div>
+                <div className="text-sm font-medium flex items-center gap-2">
+                  Audio habits
+                  <span className="text-[10px] uppercase tracking-wide text-aura-watch/80 border border-aura-watch/25 rounded-full px-2 py-0.5">
+                    experimental · mic
+                  </span>
                 </div>
-                <Toggle checked={audio.enabled} onChange={handleToggleAudio} activeClassName="bg-[#6f9db7]" offClassName="bg-[#c5cec5]" />
+                <div className="text-xs text-white/40 max-w-sm">
+                  Teeth grinding and knuckle cracking, detected from sound alone via the Web Audio
+                  API — a rule-based signal check, not a trained model. Requires microphone access.
+                </div>
               </div>
-              <p className="text-xs text-[#7b877f] leading-relaxed">
-                Teeth grinding and knuckle cracking, detected from sound alone via the Web Audio
-                API. Requires microphone access.
-              </p>
-              {audio.enabled && (
-                <div className="mt-4 pt-4 border-t border-[#233b35]/10 space-y-4">
-                  <label className="block">
-                    <span className="mb-1.5 flex items-center justify-between text-[11px] text-[#7d8981]">
-                      <span>Grinding sensitivity</span>
-                      <span className="font-mono">{Math.round(audio.thresholds.teeth_grinding * 100)}%</span>
-                    </span>
-                    <input
-                      type="range"
-                      min={0.2}
-                      max={0.9}
-                      step={0.05}
-                      value={audio.thresholds.teeth_grinding}
-                      onChange={(e) => setAudioThreshold('teeth_grinding', parseFloat(e.target.value))}
-                      className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-[#d9e0d7] accent-[#6f9db7]"
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="mb-1.5 flex items-center justify-between text-[11px] text-[#7d8981]">
-                      <span>Cracking sensitivity</span>
-                      <span className="font-mono">{Math.round(audio.thresholds.knuckle_cracking * 100)}%</span>
-                    </span>
-                    <input
-                      type="range"
-                      min={0.2}
-                      max={0.9}
-                      step={0.05}
-                      value={audio.thresholds.knuckle_cracking}
-                      onChange={(e) => setAudioThreshold('knuckle_cracking', parseFloat(e.target.value))}
-                      className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-[#d9e0d7] accent-[#6f9db7]"
-                    />
-                  </label>
+            </div>
+            <Toggle checked={audio.enabled} onChange={handleToggleAudio} activeClassName="bg-aura-watch" />
+          </div>
+          {audio.enabled && (
+            <div className="mt-4 grid sm:grid-cols-2 gap-6">
+              <div>
+                <div className="flex justify-between text-xs text-white/45 mb-2">
+                  <span>Grinding sensitivity</span>
+                  <span className="font-mono">{Math.round(audio.thresholds.teeth_grinding * 100)}%</span>
                 </div>
-              )}
-            </Panel>
+                <input
+                  type="range"
+                  min={0.2}
+                  max={0.9}
+                  step={0.05}
+                  value={audio.thresholds.teeth_grinding}
+                  onChange={(e) => setAudioThreshold('teeth_grinding', parseFloat(e.target.value))}
+                  className="w-full accent-aura-watch"
+                />
+              </div>
+              <div>
+                <div className="flex justify-between text-xs text-white/45 mb-2">
+                  <span>Cracking sensitivity</span>
+                  <span className="font-mono">{Math.round(audio.thresholds.knuckle_cracking * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={0.2}
+                  max={0.9}
+                  step={0.05}
+                  value={audio.thresholds.knuckle_cracking}
+                  onChange={(e) => setAudioThreshold('knuckle_cracking', parseFloat(e.target.value))}
+                  className="w-full accent-aura-watch"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5 space-y-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {soundEnabled ? <Volume2 size={16} className="text-aura-calm" /> : <VolumeX size={16} className="text-white/40" />}
+              <div>
+                <div className="text-sm font-medium">Sound on reminders</div>
+                <div className="text-xs text-white/40">A soft two-note chime, not an alarm.</div>
+              </div>
+            </div>
+            <Toggle checked={soundEnabled} onChange={() => setSoundEnabled(!soundEnabled)} />
+          </div>
+
+          <div className="flex items-center justify-between pt-4 border-t border-white/[0.06]">
+            <div>
+              <div className="text-sm font-medium">Gentle mode</div>
+              <div className="text-xs text-white/40">Softer toast styling. Turn off for a more visually assertive reminder.</div>
+            </div>
+            <Toggle checked={gentleMode} onChange={() => setGentleMode(!gentleMode)} />
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5 mt-4">
+          <div className="text-sm font-medium mb-1">Export your data</div>
+          <p className="text-xs text-white/40 mb-4 max-w-sm">
+            Every session, event, and calibration sample for this profile, straight from your local
+            database — no account, no server-side gating.
+          </p>
+          <div className="flex items-center gap-3">
+            <motion.a
+              whileTap={{ scale: 0.96 }}
+              whileHover={{ y: -1 }}
+              href={api.exportUrl(profileId, 'json')}
+              className="inline-flex items-center gap-2 text-sm border border-white/15 rounded-full px-4 py-2 text-white/70 hover:text-white hover:border-white/30 transition-colors"
+            >
+              <Download size={14} /> Download JSON
+            </motion.a>
+            <motion.a
+              whileTap={{ scale: 0.96 }}
+              whileHover={{ y: -1 }}
+              href={api.exportUrl(profileId, 'csv')}
+              className="inline-flex items-center gap-2 text-sm border border-white/15 rounded-full px-4 py-2 text-white/70 hover:text-white hover:border-white/30 transition-colors"
+            >
+              <Download size={14} /> Download CSV (.zip)
+            </motion.a>
           </div>
         </div>
       </div>

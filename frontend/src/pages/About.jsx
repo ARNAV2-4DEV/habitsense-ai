@@ -1,10 +1,7 @@
 import { useEffect, useRef } from 'react'
 import gsap from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
-import { Sparkles, LockKeyhole, HeartHandshake } from 'lucide-react'
-import Panel from '../components/ui/Panel'
-import SectionLabel from '../components/ui/SectionLabel'
-import PaperAmbientField from '../components/ui/PaperAmbientField'
+import AmbientGlow from '../components/ui/AmbientGlow'
 
 gsap.registerPlugin(ScrollTrigger)
 
@@ -43,40 +40,10 @@ export default function About() {
   }, [])
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#f4f1e9] text-[#182522]">
-      <PaperAmbientField />
-      <div ref={containerRef} className="relative max-w-3xl mx-auto px-6 md:px-10 py-10 md:py-16">
-        <p className="mb-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[.2em] text-[#6c958b]">
-          <Sparkles size={13} /> About HabitSense
-        </p>
-        <h1 className="font-display text-5xl tracking-[-.03em] text-[#1c3731]">Curiosity over correction.</h1>
-        <p className="mt-5 text-base leading-relaxed text-[#68756d]">
-          HabitSense is a calm self-awareness tool for noticing body-focused habits — every
-          claim below is about what this specific app actually does, not a generic pitch.
-        </p>
-
-        <div className="mt-8 grid gap-4 sm:grid-cols-2">
-          <Panel className="p-6">
-            <LockKeyhole className="text-[#65988c]" size={20} />
-            <h2 className="mt-5 font-display text-2xl text-[#31554b]">Private by design</h2>
-            <p className="mt-2 text-sm leading-relaxed text-[#718078]">
-              Video frames never leave your browser tab. Only numeric landmark coordinates reach
-              the backend running on your own machine.
-            </p>
-          </Panel>
-          <Panel className="p-6">
-            <HeartHandshake className="text-[#bc8c6b]" size={20} />
-            <h2 className="mt-5 font-display text-2xl text-[#31554b]">Neutral by default</h2>
-            <p className="mt-2 text-sm leading-relaxed text-[#718078]">
-              Every signal is an observation to consider, never a score to chase or a label to
-              carry — see "self-awareness, not diagnosis" below.
-            </p>
-          </Panel>
-        </div>
-
-        <div className="mt-10">
-          <SectionLabel>How it actually works</SectionLabel>
-        </div>
+    <div className="relative overflow-hidden">
+      <AmbientGlow />
+      <div ref={containerRef} className="relative max-w-3xl mx-auto px-6 md:px-10 py-10 md:py-14">
+        <h1 className="font-display text-3xl tracking-tight mb-8">How this actually works</h1>
 
         <Section title="The tracking is real, pretrained, and from Google">
           <p>
@@ -92,7 +59,7 @@ export default function About() {
             Every frame is reduced to 28 numbers — distances, angles, curl, a pinch-grip shape,
             dwell time, and a region/finger contact map — each with a plain-language meaning:
           </p>
-          <div className="grid sm:grid-cols-2 gap-x-6 gap-y-1 font-mono text-xs text-[#8a948d]">
+          <div className="grid sm:grid-cols-2 gap-x-6 gap-y-1 font-mono text-xs text-white/50">
             {FEATURES.map((f) => (
               <div key={f}>· {f}</div>
             ))}
@@ -109,7 +76,7 @@ export default function About() {
             with randomized noise, so the app works reasonably on first launch.
           </p>
           <p>
-            The moment you run <span className="text-[#1c3731] font-medium">Calibrate</span>, your own real,
+            The moment you run <span className="text-white/80">Calibrate</span>, your own real,
             labeled feature vectors are stored and the model is retrained — a real scikit-learn
             RandomForest, refit from scratch — with your samples weighted heavily enough to
             meaningfully personalize the result. You can watch the cross-validated accuracy
@@ -161,7 +128,7 @@ export default function About() {
           </p>
           <ul className="space-y-2 list-disc list-inside">
             <li>
-              <span className="text-[#1c3731] font-medium">Posture</span> uses MediaPipe's body pose model to
+              <span className="text-white/80">Posture</span> uses MediaPipe's body pose model to
               compare your current shoulder/neck geometry against a short baseline captured at the
               start of your own session — not an absolute "correct posture" standard, since that
               depends entirely on your camera distance and body proportions. It's also flagged
@@ -169,7 +136,7 @@ export default function About() {
               BFRBs above.
             </li>
             <li>
-              <span className="text-[#1c3731] font-medium">Audio habits</span> analyze microphone input with
+              <span className="text-white/80">Audio habits</span> analyze microphone input with
               plain signal processing (sustained energy in a friction-noise band for grinding, a
               sharp isolated transient for cracking) — there's no labeled audio dataset for these
               sounds any more than there's a video one, so this doesn't pretend to be a trained
@@ -200,9 +167,9 @@ export default function About() {
 
 function Section({ title, children }) {
   return (
-    <div className="about-section mb-9 pb-9 border-b border-[#233b35]/10 last:border-0">
-      <h2 className="text-lg font-semibold text-[#28453c] mb-3">{title}</h2>
-      <div className="text-[#5f6d65] text-sm leading-relaxed">{children}</div>
+    <div className="about-section mb-9 pb-9 border-b border-white/[0.06] last:border-0">
+      <h2 className="text-lg font-medium mb-3">{title}</h2>
+      <div className="text-white/55 text-sm leading-relaxed">{children}</div>
     </div>
   )
 }

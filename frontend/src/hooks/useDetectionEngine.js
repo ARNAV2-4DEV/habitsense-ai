@@ -6,6 +6,7 @@ import { createAudioMonitor } from '../lib/audioDetection'
 import { api } from '../lib/api'
 import { useStore } from '../state/store'
 import { requestConsent } from '../lib/consent'
+import { scheduleVideoFrameLoop, cancelVideoFrameLoop } from '../lib/videoFrameLoop'
 
 const BACKEND_POLL_MS = 200 // ~5 calls/sec to the local classifier — plenty for dwell-smoothed detection
 
@@ -174,7 +175,7 @@ export function useDetectionEngine() {
   }, [])
 
   const stop = useCallback(async () => {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current)
+    cancelVideoFrameLoop(rafRef.current)
     rafRef.current = null
     const nowSec = Date.now() / 1000
     for (const habit of Object.keys(openEventsRef.current)) {
@@ -254,15 +255,24 @@ export function useDetectionEngine() {
   const loop = useCallback(() => {
     // Not async: the backend call below is intentionally fire-and-forget
     // (.then()/.catch(), never awaited) so a slow network response can
-    // never delay the next requestAnimationFrame.
+    // never delay the next frame.
     const tick = () => {
       const video = videoRef.current
       const { faceLandmarker, handLandmarker } = detectorsRef.current || {}
       if (!video || !faceLandmarker || !handLandmarker || video.readyState < 2) {
-        rafRef.current = requestAnimationFrame(tick)
+        // Plain rAF here, deliberately: requestVideoFrameCallback may not
+        // fire at all before the video actually starts playing, which
+        // would stall this readiness poll indefinitely. Once past this
+        // check, scheduling below switches to frame-synced timing.
+        rafRef.current = { kind: 'raf', id: requestAnimationFrame(tick) }
         return
       }
 
+      // Real fps -- see the throttled setFps below, and note this is now
+      // the camera's actual delivery rate (commonly ~30/sec), not the
+      // display's refresh rate (commonly 60/sec): MediaPipe inference is
+      // the most expensive step in this loop, and re-running it on a video
+      // frame that hasn't changed since the last tick was pure waste.
       const now = performance.now()
       const dtSec = Math.max(0, (now - lastFrameTimeRef.current) / 1000)
       lastFrameTimeRef.current = now
@@ -361,14 +371,14 @@ export function useDetectionEngine() {
           })
       }
 
-      rafRef.current = requestAnimationFrame(tick)
+      rafRef.current = scheduleVideoFrameLoop(video, tick)
     }
-    rafRef.current = requestAnimationFrame(tick)
+    rafRef.current = scheduleVideoFrameLoop(videoRef.current, tick)
   }, [handleClassification, updateStreak])
 
   useEffect(() => {
     return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      cancelVideoFrameLoop(rafRef.current)
     }
   }, [])
 

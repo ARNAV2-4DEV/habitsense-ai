@@ -46,24 +46,21 @@ button:disabled, [aria-disabled="true"] {
   mix-blend-mode: overlay;
 }
 
-/* Barely-perceptible ambient drift for the paper-theme background (see
-   PaperAmbientField.jsx, used by Live/Calibrate/Settings/About/Dashboard) --
-   thin drifting outline shapes, matching the design reference's AmbientField.
+/* Barely-perceptible ambient drift for the background glow blobs used on
+   Live/Calibrate/Settings/About/Dashboard (see components/ui/AmbientGlow.jsx).
    Pure CSS transform keyframes -- no JS/rAF -- so it costs nothing on Live
    and Calibrate, which run MediaPipe inference continuously while mounted.
    Two different durations/directions so the pair never moves in lockstep. */
-@keyframes paper-field-a-drift {
-  0%, 100% { transform: translate(0, 0); }
-  33% { transform: translate(6%, -4%); }
-  66% { transform: translate(-3%, 3%); }
+@keyframes ambient-drift-a {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(4%, -3%) scale(1.04); }
 }
-@keyframes paper-field-b-drift {
-  0%, 100% { transform: translate(0, 0); }
-  33% { transform: translate(-8%, 5%); }
-  66% { transform: translate(5%, -3%); }
+@keyframes ambient-drift-b {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-3%, 4%) scale(1.06); }
 }
-.paper-field-a { animation: paper-field-a-drift 26s ease-in-out infinite; will-change: transform; }
-.paper-field-b { animation: paper-field-b-drift 32s ease-in-out infinite; will-change: transform; }
+.ambient-glow-a { animation: ambient-drift-a 26s ease-in-out infinite; will-change: transform; }
+.ambient-glow-b { animation: ambient-drift-b 32s ease-in-out infinite; will-change: transform; }
 
 .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
 .scrollbar-thin::-webkit-scrollbar-thumb { background: #2a3049; border-radius: 999px; }

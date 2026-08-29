@@ -36,12 +36,28 @@ function drawPath(ctx, points, idxList, w, h, close = true) {
   ctx.stroke()
 }
 
-// BlazePose indices this overlay draws -- see lib/postureFeatures.js for why
-// only these four points (the ones the slouch heuristic actually reads).
-const POSE_LEFT_SHOULDER = 11
-const POSE_RIGHT_SHOULDER = 12
-const POSE_LEFT_EAR = 7
-const POSE_RIGHT_EAR = 8
+// BlazePose's full 33-point topology and standard connection set (matches
+// MediaPipe's own pose_connections.py). postureFeatures.js only READS four
+// of these points (shoulders + ears) for the slouch heuristic -- this is
+// purely the visual "full skeleton" overlay, independent of that.
+const POSE_CONNECTIONS = [
+  // face
+  [0, 1], [1, 2], [2, 3], [3, 7], [0, 4], [4, 5], [5, 6], [6, 8], [9, 10],
+  // torso
+  [11, 12], [11, 23], [12, 24], [23, 24],
+  // arms
+  [11, 13], [13, 15], [12, 14], [14, 16],
+  // hands
+  [15, 17], [15, 19], [15, 21], [17, 19], [16, 18], [16, 20], [16, 22], [18, 20],
+  // legs
+  [23, 25], [25, 27], [24, 26], [26, 28],
+  // feet
+  [27, 29], [29, 31], [27, 31], [28, 30], [30, 32], [28, 32],
+]
+const POSE_MIN_VISIBILITY = 0.5
+function poseVisible(p) {
+  return !!p && (p.visibility === undefined || p.visibility >= POSE_MIN_VISIBILITY)
+}
 
 // face/hands/pose arrive as refs, not values: they're mutated on every
 // video frame (up to 60x/sec) by the detection loop, and this component's
@@ -51,7 +67,7 @@ const POSE_RIGHT_EAR = 8
 // re-render of the entire page (including the AuraOrb canvas) just to
 // re-run this component's *own* rAF loop, which needs no React involvement
 // at all. See useDetectionEngine.js/useCalibrationCapture.js for the refs.
-export default function CameraStage({ videoRef, faceRef, handsRef, poseRef, statusColor = '#5ee7c8', light = false, fps = null }) {
+export default function CameraStage({ videoRef, faceRef, handsRef, poseRef, statusColor = '#5ee7c8' }) {
   const canvasRef = useRef(null)
   const colorRef = useRef(statusColor)
 
@@ -113,29 +129,30 @@ export default function CameraStage({ videoRef, faceRef, handsRef, poseRef, stat
           ctx.setLineDash([])
         }
 
+        // Full-body skeleton -- only ever populated when the (opt-in, off by
+        // default) posture feature is on, so this costs nothing otherwise.
+        // postureFeatures.js's slouch heuristic only reads 4 of these 33
+        // points; this draws the complete rig for a real "see your whole
+        // pose" view, not just the fragment the classifier happens to use.
         if (pose) {
-          const ls = pose[POSE_LEFT_SHOULDER]
-          const rs = pose[POSE_RIGHT_SHOULDER]
-          const le = pose[POSE_LEFT_EAR]
-          const re = pose[POSE_RIGHT_EAR]
-          if (ls && rs && le && re) {
-            ctx.strokeStyle = 'rgba(124,156,245,0.5)'
-            ctx.lineWidth = 1.4
-            ctx.setLineDash([3, 3])
-            ;[[ls, rs], [ls, le], [rs, re]].forEach(([a, b]) => {
-              ctx.beginPath()
-              ctx.moveTo(a.x * w, a.y * h)
-              ctx.lineTo(b.x * w, b.y * h)
-              ctx.stroke()
-            })
-            ctx.setLineDash([])
-            ctx.fillStyle = 'rgba(124,156,245,0.7)'
-            ;[ls, rs, le, re].forEach((p) => {
-              ctx.beginPath()
-              ctx.arc(p.x * w, p.y * h, 3, 0, Math.PI * 2)
-              ctx.fill()
-            })
-          }
+          ctx.strokeStyle = 'rgba(124,156,245,0.55)'
+          ctx.lineWidth = 1.6
+          POSE_CONNECTIONS.forEach(([a, b]) => {
+            const pa = pose[a]
+            const pb = pose[b]
+            if (!poseVisible(pa) || !poseVisible(pb)) return
+            ctx.beginPath()
+            ctx.moveTo(pa.x * w, pa.y * h)
+            ctx.lineTo(pb.x * w, pb.y * h)
+            ctx.stroke()
+          })
+          ctx.fillStyle = 'rgba(124,156,245,0.85)'
+          pose.forEach((p) => {
+            if (!poseVisible(p)) return
+            ctx.beginPath()
+            ctx.arc(p.x * w, p.y * h, 2.6, 0, Math.PI * 2)
+            ctx.fill()
+          })
         }
 
         if (hands) {
@@ -191,13 +208,7 @@ export default function CameraStage({ videoRef, faceRef, handsRef, poseRef, stat
   }, [videoRef, faceRef, handsRef, poseRef])
 
   return (
-    <div
-      className={
-        light
-          ? 'relative w-full aspect-[4/3] rounded-[1.25rem] overflow-hidden border border-[#233b35]/15 bg-[#dbe3da]'
-          : 'relative w-full aspect-[4/3] rounded-3xl overflow-hidden border border-white/10 bg-black'
-      }
-    >
+    <div className="relative w-full aspect-[4/3] rounded-3xl overflow-hidden border border-white/10 bg-black">
       <video
         ref={videoRef}
         className="w-full h-full object-cover -scale-x-100"
@@ -208,14 +219,8 @@ export default function CameraStage({ videoRef, faceRef, handsRef, poseRef, stat
         ref={canvasRef}
         className="absolute inset-0 w-full h-full -scale-x-100"
       />
-      {light && (
-        <div className="absolute left-4 top-4 flex items-center gap-2 rounded-full bg-[#f4f1e9]/75 px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-[.12em] text-[#50766d]">
-          <span className="h-1.5 w-1.5 rounded-full bg-[#70a999]" />
-          Local landmarks active{fps != null ? ` · ${fps} fps` : ''}
-        </div>
-      )}
       <div
-        className={`pointer-events-none absolute inset-0 transition-shadow duration-500 ${light ? 'rounded-[1.25rem]' : 'rounded-3xl'}`}
+        className="pointer-events-none absolute inset-0 rounded-3xl transition-shadow duration-500"
         style={{ boxShadow: `inset 0 0 60px -10px ${statusColor}55` }}
       />
     </div>

@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react'
 import { loadDetectors, detectFrame } from '../lib/mediapipeSetup'
 import { createFeatureExtractor } from '../lib/featureExtraction'
 import { requestConsent } from '../lib/consent'
+import { scheduleVideoFrameLoop, cancelVideoFrameLoop } from '../lib/videoFrameLoop'
 
 const SAMPLE_INTERVAL_MS = 140 // ~7 samples/sec while recording a burst
 
@@ -51,7 +52,8 @@ export function useCalibrationCapture() {
   }, [])
 
   const stop = useCallback(() => {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current)
+    cancelVideoFrameLoop(rafRef.current)
+    rafRef.current = null
     const stream = videoRef.current?.srcObject
     if (stream) stream.getTracks().forEach((t) => t.stop())
     if (videoRef.current) videoRef.current.srcObject = null
@@ -59,6 +61,10 @@ export function useCalibrationCapture() {
   }, [])
 
   const loop = useCallback(() => {
+    // Frame-synced via requestVideoFrameCallback where available (see
+    // lib/videoFrameLoop.js) -- same fix as useDetectionEngine.js: without
+    // it, MediaPipe inference re-runs on identical video frames whenever
+    // the display refresh rate exceeds the camera's actual frame rate.
     const tick = () => {
       const video = videoRef.current
       const { faceLandmarker, handLandmarker } = detectorsRef.current || {}
@@ -74,9 +80,9 @@ export function useCalibrationCapture() {
           collectedRef.current.push(vec)
         }
       }
-      rafRef.current = requestAnimationFrame(tick)
+      rafRef.current = scheduleVideoFrameLoop(video, tick)
     }
-    rafRef.current = requestAnimationFrame(tick)
+    rafRef.current = scheduleVideoFrameLoop(videoRef.current, tick)
   }, [])
 
   /** Records for durationMs, resolving with the collected feature vectors. */

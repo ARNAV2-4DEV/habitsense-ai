@@ -6,11 +6,7 @@ import { useStore } from '../state/store'
 import { api } from '../lib/api'
 import { runQualityGates, MAX_GATE_RETRIES } from '../lib/qualityGates'
 import CameraStage from '../components/detection/CameraStage'
-import Panel from '../components/ui/Panel'
-import SectionLabel from '../components/ui/SectionLabel'
-import PaperAmbientField from '../components/ui/PaperAmbientField'
-import PrivacyPanel from '../components/ui/PrivacyPanel'
-import { STATUS_COLOR } from '../lib/paperTheme'
+import AmbientGlow from '../components/ui/AmbientGlow'
 
 const HABIT_COPY = {
   nail_biting: { label: 'Nail biting', prompt: 'Bring a fingertip to your mouth as if biting your nail.' },
@@ -24,17 +20,12 @@ const HABIT_COPY = {
   chin_resting: { label: 'Chin/cheek resting', prompt: 'Rest your chin or cheek in your hand and hold still, like resting your head while thinking.', category: 'posture' },
 }
 
-// Real phases the recording pipeline actually moves through -- used to
-// drive the step-progress bar (ported visual from the reference's flow
-// dots), not a separate manually-advanced demo state like the reference had.
-const PHASE_ORDER = ['idle', 'countdown', 'recording-habit', 'recording-neutral', 'uploading']
-
 function ProgressRing({ durationMs, color }) {
   const r = 28
   const c = 2 * Math.PI * r
   return (
     <svg width="64" height="64" viewBox="0 0 64 64" className="mx-auto mb-3 -rotate-90">
-      <circle cx="32" cy="32" r={r} fill="none" stroke="rgba(35,59,53,0.1)" strokeWidth="4" />
+      <circle cx="32" cy="32" r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="4" />
       <motion.circle
         cx="32"
         cy="32"
@@ -241,260 +232,213 @@ export default function Calibrate() {
     refreshModelInfo()
   }
 
-  const recordColor =
-    phase === 'recording-habit' ? STATUS_COLOR[currentHabit] || STATUS_COLOR.none
-    : phase === 'recording-neutral' ? STATUS_COLOR.none
-    : '#4e8a7c'
+  const recordColor = phase === 'recording-habit' ? '#f5647c' : phase === 'recording-neutral' ? '#5ee7c8' : '#7c9cf5'
   const currentReps = repCounts[currentHabit] || 0
   const currentFailedAttempts = failedAttempts[currentHabit] || 0
-  const phaseStepIndex = Math.max(0, PHASE_ORDER.indexOf(phase === 'gate-failed' ? 'uploading' : phase))
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#f4f1e9] text-[#182522]">
-      <PaperAmbientField />
+    <div className="relative overflow-hidden">
+      <AmbientGlow />
       <div className="relative max-w-6xl mx-auto px-6 md:px-10 py-10 md:py-14">
-        <div className="mb-7">
-          <p className="mb-2 font-mono text-[10px] uppercase tracking-[.2em] text-[#6c958b]">
-            Personal model · local retraining
-          </p>
-          <h1 className="font-display text-4xl tracking-[-.03em] text-[#1c3731] sm:text-5xl">
-            Teach it your rhythm.
-          </h1>
-          <p className="mt-3 max-w-xl text-sm leading-relaxed text-[#68756d]">
+        <div className="mb-8">
+          <h1 className="font-display text-3xl tracking-tight">Calibrate to you</h1>
+          <p className="text-white/50 mt-1 text-sm max-w-xl">
             A short guided recording per habit — a burst of the behavior, then a neutral burst —
-            gives the classifier real, labeled examples of your specific movements. This is
-            genuine retraining: you'll see the cross-validated accuracy change.
+            gives the classifier real, labeled examples of your specific movements and hand
+            shape. This is genuine retraining: you'll see the cross-validated accuracy change.
+            Recording 3+ reps per habit gets a model going; 10-15 across a few sessions gets it
+            well personalized.
           </p>
         </div>
 
-        <div className="grid gap-7 lg:grid-cols-[minmax(0,1.35fr)_minmax(360px,.85fr)]">
+        <div className="grid lg:grid-cols-[1fr_360px] gap-8">
           <div>
-            <SectionLabel detail={ready ? 'camera on' : 'camera off'}>Sample preview</SectionLabel>
-            <Panel className="p-3 sm:p-5">
-              <CameraStage videoRef={videoRef} faceRef={lastFaceRef} handsRef={lastHandsRef} statusColor={recordColor} light />
+            <CameraStage videoRef={videoRef} faceRef={lastFaceRef} handsRef={lastHandsRef} statusColor={recordColor} />
 
-              {!ready && (
-                <div className="mt-5 flex justify-center">
-                  <motion.button
-                    onClick={handleBegin}
-                    disabled={!!loadingMsg}
-                    whileTap={{ scale: 0.96 }}
-                    className="inline-flex items-center gap-2 bg-[#1d3933] text-white text-sm font-medium rounded-full px-5 py-2.5 hover:bg-[#274943] transition-colors disabled:opacity-60"
-                  >
-                    {loadingMsg ? <Loader2 size={16} className="animate-spin" /> : <Play size={15} />}
-                    {loadingMsg || 'Turn on camera'}
-                  </motion.button>
-                </div>
-              )}
+            {!ready && (
+              <div className="mt-6 flex justify-center">
+                <motion.button
+                  onClick={handleBegin}
+                  disabled={!!loadingMsg}
+                  whileTap={{ scale: 0.96 }}
+                  className="inline-flex items-center gap-2 bg-white text-ink-950 text-sm font-medium rounded-full px-5 py-2.5 hover:bg-aura-calm transition-colors disabled:opacity-60"
+                >
+                  {loadingMsg ? <Loader2 size={16} className="animate-spin" /> : <Play size={15} />}
+                  {loadingMsg || 'Turn on camera'}
+                </motion.button>
+              </div>
+            )}
 
-              {error && <p className="text-[#8b3f34] text-sm text-center mt-4">{error}</p>}
+            {error && <p className="text-aura-flag text-sm text-center mt-4">{error}</p>}
 
-              <AnimatePresence mode="wait">
-                {ready && (
-                  <motion.div
-                    key={phase + habitIndex}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -8 }}
-                    className="mt-5 rounded-xl border border-[#233b35]/10 bg-[#f8f7f1]/60 p-6 text-center"
-                  >
-                    {phase === 'idle' && (
-                      <>
-                        <div className="font-mono text-[10px] uppercase tracking-[.14em] text-[#87918a] mb-2">
-                          Step {habitIndex + 1} of {habits.length}
-                        </div>
-                        <h3 className="text-lg font-semibold text-[#28453c] mb-2 flex items-center justify-center gap-2">
-                          {HABIT_COPY[currentHabit].label}
-                          {HABIT_COPY[currentHabit].category === 'posture' && (
-                            <span className="text-[10px] uppercase tracking-wide text-[#6f9db7] border border-[#6f9db7]/30 rounded-full px-2 py-0.5">
-                              posture, not a BFRB
-                            </span>
-                          )}
-                        </h3>
-                        <p className="text-sm text-[#5f6d65] max-w-sm mx-auto mb-4">
-                          {HABIT_COPY[currentHabit].prompt} You'll get a 3-second countdown, then{' '}
-                          {HABIT_BURST_MS / 1000}s doing it, then a short neutral pose.
-                        </p>
+            <AnimatePresence mode="wait">
+              {ready && (
+                <motion.div
+                  key={phase + habitIndex}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  className="mt-6 rounded-2xl border border-white/[0.08] bg-white/[0.02] p-6 text-center"
+                >
+                  {phase === 'idle' && (
+                    <>
+                      <div className="text-xs uppercase tracking-wide text-white/40 mb-2">
+                        Step {habitIndex + 1} of {habits.length}
+                      </div>
+                      <h3 className="text-lg font-medium mb-2 flex items-center justify-center gap-2">
+                        {HABIT_COPY[currentHabit].label}
+                        {HABIT_COPY[currentHabit].category === 'posture' && (
+                          <span className="text-[10px] uppercase tracking-wide text-aura-watch/80 border border-aura-watch/25 rounded-full px-2 py-0.5">
+                            posture, not a BFRB
+                          </span>
+                        )}
+                      </h3>
+                      <p className="text-sm text-white/55 max-w-sm mx-auto mb-4">
+                        {HABIT_COPY[currentHabit].prompt} You'll get a 3-second countdown, then{' '}
+                        {HABIT_BURST_MS / 1000}s doing it, then a short neutral pose.
+                      </p>
 
-                        {currentHabit !== 'lip_biting' && (
-                          <div className="flex flex-col items-center gap-2 mb-5">
+                      {currentHabit !== 'lip_biting' && (
+                        <div className="flex flex-col items-center gap-2 mb-5">
+                          <VariantChips
+                            options={HAND_OPTIONS}
+                            value={variant.hand}
+                            onChange={(v) => setVariant((s) => ({ ...s, hand: v }))}
+                          />
+                          {ISOLATED_FINGER_HABITS.includes(currentHabit) && (
                             <VariantChips
-                              options={HAND_OPTIONS}
-                              value={variant.hand}
-                              onChange={(v) => setVariant((s) => ({ ...s, hand: v }))}
+                              options={FINGER_OPTIONS}
+                              value={variant.finger}
+                              onChange={(v) => setVariant((s) => ({ ...s, finger: v }))}
                             />
-                            {ISOLATED_FINGER_HABITS.includes(currentHabit) && (
-                              <VariantChips
-                                options={FINGER_OPTIONS}
-                                value={variant.finger}
-                                onChange={(v) => setVariant((s) => ({ ...s, finger: v }))}
-                              />
-                            )}
-                          </div>
-                        )}
-
-                        <motion.button
-                          onClick={() => runStepForHabit(currentHabit)}
-                          whileTap={{ scale: 0.96 }}
-                          whileHover={{ scale: 1.02 }}
-                          className="inline-flex items-center gap-2 bg-[#1d3933] text-white text-sm font-medium rounded-full px-5 py-2.5"
-                        >
-                          {currentReps > 0 ? 'Record another rep' : 'Record this habit'}
-                        </motion.button>
-
-                        <p className="text-xs text-[#7c8880] mt-3">
-                          {currentReps} rep{currentReps === 1 ? '' : 's'} recorded so far
-                          {currentReps < REP_MINIMUM
-                            ? ` — record at least ${REP_MINIMUM} to get a personal model going`
-                            : ` — keep going toward ${REP_SUGGESTED}+ across sessions for the best personalization, or move on whenever you're ready`}
-                        </p>
-                      </>
-                    )}
-
-                    {phase === 'countdown' && (
-                      <div className="py-6">
-                        <div className="text-5xl font-display text-[#1c3731]">{countdownN > 0 ? countdownN : '···'}</div>
-                        <p className="text-[#7c8880] text-sm mt-2">Get ready…</p>
-                      </div>
-                    )}
-
-                    {phase === 'recording-habit' && (
-                      <div className="py-6">
-                        <ProgressRing durationMs={HABIT_BURST_MS} color={STATUS_COLOR[currentHabit] || STATUS_COLOR.none} />
-                        <p className="font-semibold text-[#28453c]">{HABIT_COPY[currentHabit].label} — go ahead</p>
-                        <p className="text-[#7c8880] text-sm mt-1">{HABIT_COPY[currentHabit].prompt}</p>
-                      </div>
-                    )}
-
-                    {phase === 'recording-neutral' && (
-                      <div className="py-6">
-                        <ProgressRing durationMs={NEUTRAL_BURST_MS} color={STATUS_COLOR.none} />
-                        <p className="font-semibold text-[#28453c]">Now relax — hands away from your face</p>
-                      </div>
-                    )}
-
-                    {phase === 'uploading' && (
-                      <div className="py-6 flex flex-col items-center gap-2 text-[#7c8880] text-sm">
-                        <Loader2 size={18} className="animate-spin" />
-                        Saving samples…
-                      </div>
-                    )}
-
-                    {phase === 'gate-failed' && (
-                      <div className="py-6">
-                        <AlertCircle size={22} className="mx-auto text-[#8b3f34] mb-2" />
-                        <p className="font-semibold text-[#8b3f34]">That didn't quite capture it</p>
-                        <p className="text-[#7c8880] text-sm mt-1.5 max-w-sm mx-auto">{gateFailure}</p>
-                        <div className="flex justify-center gap-3 mt-5">
-                          <motion.button
-                            onClick={handleRetry}
-                            whileTap={{ scale: 0.96 }}
-                            className="inline-flex items-center gap-2 bg-[#1d3933] text-white text-sm font-medium rounded-full px-5 py-2.5"
-                          >
-                            Try again
-                          </motion.button>
-                          {currentFailedAttempts >= MAX_GATE_RETRIES && (
-                            <motion.button
-                              onClick={handleRecordAnyway}
-                              whileTap={{ scale: 0.96 }}
-                              className="inline-flex items-center gap-2 text-[#69766e] hover:text-[#1d3933] text-sm border border-[#233b35]/15 rounded-full px-5 py-2.5"
-                            >
-                              Record anyway
-                            </motion.button>
                           )}
                         </div>
+                      )}
+
+                      <motion.button
+                        onClick={() => runStepForHabit(currentHabit)}
+                        whileTap={{ scale: 0.96 }}
+                        whileHover={{ scale: 1.02 }}
+                        className="inline-flex items-center gap-2 bg-aura-calm text-ink-950 text-sm font-medium rounded-full px-5 py-2.5"
+                      >
+                        {currentReps > 0 ? 'Record another rep' : 'Record this habit'}
+                      </motion.button>
+
+                      <p className="text-xs text-white/40 mt-3">
+                        {currentReps} rep{currentReps === 1 ? '' : 's'} recorded so far
+                        {currentReps < REP_MINIMUM
+                          ? ` — record at least ${REP_MINIMUM} to get a personal model going`
+                          : ` — keep going toward ${REP_SUGGESTED}+ across sessions for the best personalization, or move on whenever you're ready`}
+                      </p>
+
+                      <div className="flex justify-center gap-2 mt-5">
+                        {habits.map((h, i) => (
+                          <button
+                            key={h}
+                            onClick={() => setHabitIndex(i)}
+                            className={`w-2 h-2 rounded-full transition-colors ${
+                              i === habitIndex ? 'bg-aura-calm' : 'bg-white/15'
+                            }`}
+                            aria-label={HABIT_COPY[h].label}
+                          />
+                        ))}
+                      </div>
+                      {habitIndex < habits.length - 1 && (
+                        <button
+                          onClick={() => setHabitIndex((i) => i + 1)}
+                          className="block mx-auto mt-4 text-xs text-white/40 hover:text-white/70"
+                        >
+                          Skip to next habit →
+                        </button>
+                      )}
+                    </>
+                  )}
+
+                  {phase === 'countdown' && (
+                    <div className="py-6">
+                      <div className="text-5xl font-display">{countdownN > 0 ? countdownN : '···'}</div>
+                      <p className="text-white/40 text-sm mt-2">Get ready…</p>
+                    </div>
+                  )}
+
+                  {phase === 'recording-habit' && (
+                    <div className="py-6">
+                      <ProgressRing durationMs={HABIT_BURST_MS} color="#f5647c" />
+                      <p className="font-medium">{HABIT_COPY[currentHabit].label} — go ahead</p>
+                      <p className="text-white/40 text-sm mt-1">{HABIT_COPY[currentHabit].prompt}</p>
+                    </div>
+                  )}
+
+                  {phase === 'recording-neutral' && (
+                    <div className="py-6">
+                      <ProgressRing durationMs={NEUTRAL_BURST_MS} color="#5ee7c8" />
+                      <p className="font-medium">Now relax — hands away from your face</p>
+                    </div>
+                  )}
+
+                  {phase === 'uploading' && (
+                    <div className="py-6 flex flex-col items-center gap-2 text-white/50 text-sm">
+                      <Loader2 size={18} className="animate-spin" />
+                      Saving samples…
+                    </div>
+                  )}
+
+                  {phase === 'gate-failed' && (
+                    <div className="py-6">
+                      <AlertCircle size={22} className="mx-auto text-aura-flag mb-2" />
+                      <p className="font-medium text-aura-flag">That didn't quite capture it</p>
+                      <p className="text-white/50 text-sm mt-1.5 max-w-sm mx-auto">{gateFailure}</p>
+                      <div className="flex justify-center gap-3 mt-5">
+                        <motion.button
+                          onClick={handleRetry}
+                          whileTap={{ scale: 0.96 }}
+                          className="inline-flex items-center gap-2 bg-aura-calm text-ink-950 text-sm font-medium rounded-full px-5 py-2.5"
+                        >
+                          Try again
+                        </motion.button>
                         {currentFailedAttempts >= MAX_GATE_RETRIES && (
-                          <p className="text-[11px] text-[#8a948d] mt-3 max-w-xs mx-auto">
-                            These checks are a starting guess, not perfectly tuned to every setup —
-                            if lighting or camera angle keeps tripping it up, go ahead and record
-                            anyway.
-                          </p>
+                          <motion.button
+                            onClick={handleRecordAnyway}
+                            whileTap={{ scale: 0.96 }}
+                            className="inline-flex items-center gap-2 text-white/50 hover:text-white/80 text-sm border border-white/15 rounded-full px-5 py-2.5"
+                          >
+                            Record anyway
+                          </motion.button>
                         )}
                       </div>
-                    )}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </Panel>
-            <div className="mt-5">
-              <PrivacyPanel>
-                <strong className="font-semibold text-[#356459]">Private by default.</strong> These recordings never
-                leave your device — only labeled landmark feature vectors are sent to your own local backend.
-              </PrivacyPanel>
-            </div>
+                      {currentFailedAttempts >= MAX_GATE_RETRIES && (
+                        <p className="text-[11px] text-white/35 mt-3 max-w-xs mx-auto">
+                          These checks are a starting guess, not perfectly tuned to every setup —
+                          if lighting or camera angle keeps tripping it up, go ahead and record
+                          anyway.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
-          <div className="space-y-5">
-            <Panel className="p-5">
-              <SectionLabel detail={`step ${phaseStepIndex + 1} of ${PHASE_ORDER.length}`}>Recording progress</SectionLabel>
-              <div className="mb-1 flex gap-1">
-                {PHASE_ORDER.map((p, index) => (
-                  <span
-                    key={p}
-                    className={`h-1.5 flex-1 rounded-full transition-colors ${index <= phaseStepIndex ? 'bg-[#4e8a7c]' : 'bg-[#dce3da]'}`}
-                  />
-                ))}
-              </div>
-              <p className="mt-3 text-xs leading-relaxed text-[#7a877f]">
-                Each rep moves through a countdown, a burst of the habit, a neutral burst, then a
-                quality check before it's saved — automatic once you press record, no manual
-                steps to click through.
-              </p>
-            </Panel>
-
-            <Panel className="p-5">
-              <SectionLabel detail={`${habits.length} habits`}>Choose a habit</SectionLabel>
-              <div className="grid grid-cols-2 gap-2">
-                {habits.map((h, i) => (
-                  <button
-                    key={h}
-                    onClick={() => setHabitIndex(i)}
-                    className={`min-h-10 rounded-lg border px-3 py-2 text-left text-[11px] transition ${
-                      habitIndex === i
-                        ? 'border-[#4e8a7c] bg-[#e5f0e8] font-semibold text-[#32675c]'
-                        : 'border-[#233b35]/10 bg-white/45 text-[#69776e] hover:bg-white/75'
-                    }`}
-                  >
-                    <span className="flex items-center gap-1.5">
-                      <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: STATUS_COLOR[h] }} />
-                      {HABIT_COPY[h].label}
-                    </span>
-                    {(repCounts[h] || 0) > 0 && (
-                      <span className="block mt-0.5 font-mono text-[10px] text-[#8a948d]">{repCounts[h]} rep{repCounts[h] === 1 ? '' : 's'}</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-              <div className="mt-5 flex items-center justify-between border-t border-[#233b35]/10 pt-4">
-                <span className="text-xs text-[#68766e]">Reps for {HABIT_COPY[currentHabit].label}</span>
-                <span className="font-mono text-sm text-[#3f695e]">{currentReps} / {REP_SUGGESTED}</span>
-              </div>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#dce3da]">
-                <div
-                  className="h-full rounded-full bg-[#71a99b]"
-                  style={{ width: `${Math.min(100, Math.round((currentReps / REP_SUGGESTED) * 100))}%` }}
-                />
-              </div>
-            </Panel>
-
-            <Panel className="p-5">
-              <SectionLabel>Samples recorded</SectionLabel>
+          <div className="space-y-6">
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }} className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5">
+              <div className="text-xs uppercase tracking-wide text-white/40 mb-3">Samples recorded</div>
               {!summary || summary.total === 0 ? (
-                <p className="text-sm text-[#8a948d]">None yet — record at least one habit to start.</p>
+                <p className="text-sm text-white/35">None yet — record at least one habit to start.</p>
               ) : (
                 <ul className="space-y-2.5 text-sm">
                   {Object.entries(summary.by_habit).map(([habit, count]) => (
                     <li key={habit}>
                       <div className="flex justify-between">
-                        <span className="text-[#4e6158]">{HABIT_COPY[habit]?.label || habit}</span>
-                        <span className="font-mono text-[#7c8880]">{count}</span>
+                        <span>{HABIT_COPY[habit]?.label || habit}</span>
+                        <span className="font-mono text-white/50">{count}</span>
                       </div>
                       {summary.by_variant?.[habit] && (
                         <div className="flex flex-wrap gap-1 mt-1">
                           {Object.entries(summary.by_variant[habit]).map(([v, n]) => (
                             <span
                               key={v}
-                              className="text-[10px] px-1.5 py-0.5 rounded-full bg-[#233b35]/[0.05] text-[#8a948d]"
+                              className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/[0.05] text-white/40"
                             >
                               {v.replace('_', ' ')} · {n}
                             </span>
@@ -505,38 +449,38 @@ export default function Calibrate() {
                   ))}
                 </ul>
               )}
-            </Panel>
+            </motion.div>
 
             {modelInfo?.per_habit && (
-              <Panel className="p-5">
-                <SectionLabel>Personalization</SectionLabel>
+              <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.06, ease: [0.16, 1, 0.3, 1] }} className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5">
+                <div className="text-xs uppercase tracking-wide text-white/40 mb-3">Personalization</div>
                 <ul className="space-y-2 text-sm">
                   {Object.entries(modelInfo.per_habit)
                     .filter(([h]) => h !== 'none')
                     .map(([habit, info]) => (
                       <li key={habit} className="flex justify-between">
-                        <span className="text-[#4e6158]">{HABIT_COPY[habit]?.label || habit}</span>
-                        <span className="font-mono text-[#7c8880] text-xs">
+                        <span>{HABIT_COPY[habit]?.label || habit}</span>
+                        <span className="font-mono text-white/50 text-xs">
                           {Math.round(info.blend_weight * 100)}% personal · {info.real_samples} samples
                         </span>
                       </li>
                     ))}
                 </ul>
-                <p className="text-[11px] text-[#8a948d] mt-3 leading-relaxed">
+                <p className="text-[11px] text-white/35 mt-3 leading-relaxed">
                   Each habit blends the shared geometric prior with a model trained only on your
                   own samples once there are enough of them (8+). 0% personal means it's still
                   running on the general prior.
                 </p>
-              </Panel>
+              </motion.div>
             )}
 
-            <Panel className="p-5">
-              <SectionLabel>Retrain</SectionLabel>
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.12, ease: [0.16, 1, 0.3, 1] }} className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5">
+              <div className="text-xs uppercase tracking-wide text-white/40 mb-3">Retrain</div>
               <motion.button
                 onClick={handleRetrain}
                 disabled={retraining || !summary?.total}
                 whileTap={{ scale: 0.97 }}
-                className="w-full inline-flex items-center justify-center gap-2 bg-[#6f9db7]/15 text-[#3d6480] border border-[#6f9db7]/30 text-sm font-medium rounded-full px-4 py-2.5 disabled:opacity-40"
+                className="w-full inline-flex items-center justify-center gap-2 bg-aura-watch/20 text-aura-watch border border-aura-watch/30 text-sm font-medium rounded-full px-4 py-2.5 disabled:opacity-40"
               >
                 {retraining ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
                 {retraining ? 'Retraining…' : 'Retrain classifier'}
@@ -549,14 +493,14 @@ export default function Calibrate() {
                     animate={{ opacity: 1, height: 'auto' }}
                     className="mt-4 text-sm space-y-1.5"
                   >
-                    <div className="flex items-center gap-2 text-[#3f7a6d]">
+                    <div className="flex items-center gap-2 text-aura-calm">
                       <CheckCircle2 size={14} /> Model retrained
                     </div>
-                    <div className="flex justify-between text-[#7c8880] text-xs">
+                    <div className="flex justify-between text-white/50 text-xs">
                       <span>Real samples used</span>
                       <span className="font-mono">{retrainResult.n_real_samples}</span>
                     </div>
-                    <div className="flex justify-between text-[#7c8880] text-xs">
+                    <div className="flex justify-between text-white/50 text-xs">
                       <span>Cross-val accuracy</span>
                       <span className="font-mono">
                         {retrainResult.cv_accuracy != null ? `${Math.round(retrainResult.cv_accuracy * 100)}%` : '—'}
@@ -568,11 +512,11 @@ export default function Calibrate() {
 
               <button
                 onClick={handleClear}
-                className="w-full mt-3 inline-flex items-center justify-center gap-2 text-[#9aa39c] hover:text-[#69766e] text-xs"
+                className="w-full mt-3 inline-flex items-center justify-center gap-2 text-white/35 hover:text-white/70 text-xs"
               >
                 <RotateCcw size={12} /> Clear my calibration data
               </button>
-            </Panel>
+            </motion.div>
           </div>
         </div>
       </div>
@@ -589,8 +533,8 @@ function VariantChips({ options, value, onChange }) {
           onClick={() => onChange(opt.value)}
           className={`text-xs px-3 py-1 rounded-full border transition-colors ${
             value === opt.value
-              ? 'bg-[#4e8a7c]/15 border-[#4e8a7c]/40 text-[#3d6459]'
-              : 'border-[#233b35]/15 text-[#8a948d] hover:text-[#4e6158]'
+              ? 'bg-aura-calm/20 border-aura-calm/40 text-aura-calm'
+              : 'border-white/15 text-white/40 hover:text-white/70'
           }`}
         >
           {opt.label}

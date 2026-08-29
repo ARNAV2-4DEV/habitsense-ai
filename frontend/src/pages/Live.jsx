@@ -9,22 +9,41 @@ import ReminderToast from '../components/detection/ReminderToast'
 import AuraOrb from '../components/three/AuraOrb'
 import MagneticButton from '../components/ui/MagneticButton'
 import Waveform from '../components/ui/Waveform'
-import Panel from '../components/ui/Panel'
-import SectionLabel from '../components/ui/SectionLabel'
-import StatusBadge from '../components/ui/StatusBadge'
-import PaperAmbientField from '../components/ui/PaperAmbientField'
-import PrivacyPanel from '../components/ui/PrivacyPanel'
-import { STATUS_COLOR, ORB_PALETTE, LABELS } from '../lib/paperTheme'
+import AmbientGlow from '../components/ui/AmbientGlow'
 
-function formatElapsed(totalSec) {
-  const m = Math.floor(totalSec / 60).toString().padStart(2, '0')
-  const s = Math.floor(totalSec % 60).toString().padStart(2, '0')
-  return `${m}:${s}`
+const cardIn = (delay = 0) => ({
+  initial: { opacity: 0, y: 12 },
+  animate: { opacity: 1, y: 0 },
+  transition: { duration: 0.4, delay, ease: [0.16, 1, 0.3, 1] },
+})
+
+const STATUS_COLOR = {
+  none: '#5ee7c8',
+  nail_biting: '#f5647c',
+  hair_pulling: '#f5647c',
+  face_touching: '#f5a35e',
+  lip_biting: '#f5a35e',
+  nose_picking: '#f5647c',
+  eye_rubbing: '#f5a35e',
+  skin_picking: '#f5a35e',
+  chewing: '#f5a35e',
+  chin_resting: '#7c9cf5',
 }
 
-function liveCopy(label) {
-  if (label === 'none') return 'No sustained pattern right now.'
-  return `A ${(LABELS[label] || label).toLowerCase()} pattern is showing up.`
+const LABELS = {
+  none: 'All clear',
+  nail_biting: 'Nail biting',
+  hair_pulling: 'Hair pulling',
+  face_touching: 'Face touching',
+  lip_biting: 'Lip biting',
+  nose_picking: 'Nose picking',
+  eye_rubbing: 'Eye rubbing',
+  skin_picking: 'Skin picking',
+  chewing: 'Chewing on objects',
+  chin_resting: 'Chin/cheek resting',
+  posture_slouching: 'Posture drift',
+  teeth_grinding: 'Teeth grinding',
+  knuckle_cracking: 'Knuckle cracking',
 }
 
 export default function Live() {
@@ -39,19 +58,6 @@ export default function Live() {
   const posture = useStore((s) => s.posture)
   const audio = useStore((s) => s.audio)
 
-  const [tab, setTab] = useState('live') // mobile-only: 'live' | 'details'
-  const [elapsedSec, setElapsedSec] = useState(0)
-
-  useEffect(() => {
-    if (!isDetecting) {
-      setElapsedSec(0)
-      return
-    }
-    const startedAt = Date.now()
-    const id = setInterval(() => setElapsedSec(Math.floor((Date.now() - startedAt) / 1000)), 1000)
-    return () => clearInterval(id)
-  }, [isDetecting])
-
   useEffect(() => {
     return () => {
       if (useStore.getState().isDetecting) stop()
@@ -60,46 +66,31 @@ export default function Live() {
   }, [])
 
   const color = STATUS_COLOR[currentLabel] || STATUS_COLOR.none
-  const badgeTone = !isDetecting ? 'neutral' : currentLabel === 'none' ? 'clear' : 'watch'
-  const badgeKicker = !isDetecting ? 'Session not running' : currentLabel === 'none' ? 'No pattern observed' : 'Top observation'
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#f4f1e9] text-[#182522]">
-      <PaperAmbientField />
+    <div className="relative overflow-hidden">
+      <AmbientGlow />
       <div className="relative max-w-6xl mx-auto px-6 md:px-10 py-10 md:py-14">
-        <div className="mb-7 flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
+        <div className="flex items-start justify-between flex-wrap gap-4 mb-8">
           <div>
-            <p className="mb-2 font-mono text-[10px] uppercase tracking-[.2em] text-[#6c958b]">
-              Personal sensing · local view
-            </p>
-            <h1 className="font-display text-4xl tracking-[-.03em] text-[#1c3731] sm:text-5xl">
-              Notice, don't judge.
-            </h1>
-            <p className="mt-3 max-w-xl text-sm leading-relaxed text-[#68756d]">
-              A quiet, local read of your current body language — nothing leaves this device.
+            <h1 className="font-display text-3xl tracking-tight">Live detection</h1>
+            <p className="text-white/50 mt-1 text-sm max-w-md">
+              Camera + models run entirely in this browser tab. Landmark coordinates only —
+              never frames — are sent to your local backend for classification.
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <div className="flex rounded-full border border-[#233b35]/10 bg-white/40 p-1 lg:hidden">
-              <button
-                onClick={() => setTab('live')}
-                className={`flex-1 rounded-full px-4 py-2 text-xs transition-colors ${tab === 'live' ? 'bg-[#1d3933] text-white' : 'text-[#65746d]'}`}
-              >
-                Live
-              </button>
-              <button
-                onClick={() => setTab('details')}
-                className={`flex-1 rounded-full px-4 py-2 text-xs transition-colors ${tab === 'details' ? 'bg-[#1d3933] text-white' : 'text-[#65746d]'}`}
-              >
-                Details
-              </button>
-            </div>
+            {isDetecting && (
+              <span className="text-[11px] font-mono text-white/35" title="Real detection-loop fps, smoothed">
+                {fps} fps
+              </span>
+            )}
             {!isDetecting ? (
               <MagneticButton
                 onClick={start}
                 disabled={!!loadingMsg}
                 strength={12}
-                className="inline-flex items-center gap-2 bg-[#1d3933] text-white text-sm font-medium rounded-full px-5 py-2.5 hover:bg-[#274943] transition-colors disabled:opacity-60 disabled:pointer-events-none"
+                className="inline-flex items-center gap-2 bg-white text-ink-950 text-sm font-medium rounded-full px-5 py-2.5 shadow-[0_0_0_0_rgba(94,231,200,0)] hover:shadow-[0_0_28px_-4px_rgba(94,231,200,0.5)] hover:bg-aura-calm transition-[background-color,box-shadow] duration-300 disabled:opacity-60 disabled:pointer-events-none"
               >
                 {loadingMsg ? <Loader2 size={16} className="animate-spin" /> : <Play size={15} />}
                 {loadingMsg || 'Start session'}
@@ -107,11 +98,11 @@ export default function Live() {
             ) : (
               <button
                 onClick={stop}
-                className="relative inline-flex items-center gap-2 bg-[#8b553f]/10 text-[#8b553f] border border-[#8b553f]/25 text-sm font-medium rounded-full px-5 py-2.5 hover:bg-[#8b553f]/15 transition-colors"
+                className="relative inline-flex items-center gap-2 bg-aura-flag/15 text-aura-flag border border-aura-flag/30 text-sm font-medium rounded-full px-5 py-2.5 hover:bg-aura-flag/25 transition-colors"
               >
                 <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#8b553f]/60" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-[#8b553f]" />
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-aura-flag/70" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-aura-flag" />
                 </span>
                 <Square size={14} /> End session
               </button>
@@ -120,124 +111,86 @@ export default function Live() {
         </div>
 
         {error && (
-          <div className="mb-6 flex items-start gap-2 rounded-xl border border-[#c2685f]/30 bg-[#f8e4e1]/70 px-4 py-3 text-sm text-[#8b3f34]">
+          <div className="mb-6 flex items-start gap-2 rounded-xl border border-aura-flag/30 bg-aura-flag/10 px-4 py-3 text-sm text-aura-flag">
             <AlertCircle size={16} className="mt-0.5 shrink-0" />
             <div>
               <div className="font-medium">Couldn't start the session</div>
-              <div className="text-[#8b3f34]/80 mt-0.5">{error}</div>
+              <div className="text-aura-flag/80 mt-0.5">{error}</div>
             </div>
           </div>
         )}
 
         {backendOnline === false && (
-          <div className="mb-6 rounded-xl border border-[#bd9d58]/35 bg-[#f4edda]/70 px-4 py-3 text-sm text-[#7a632d]">
+          <div className="mb-6 rounded-xl border border-aura-alert/30 bg-aura-alert/10 px-4 py-3 text-sm text-aura-alert">
             Backend not reachable — running on the local geometric heuristic only (still works,
             just not personalized). Start it with <code className="font-mono">uvicorn app.main:app</code> in{' '}
             <code className="font-mono">/backend</code>.
           </div>
         )}
 
-        <div className="grid gap-7 lg:grid-cols-[minmax(0,1.65fr)_minmax(330px,.9fr)]">
-          <div className={tab === 'details' ? 'hidden lg:block' : ''}>
-            <SectionLabel detail={isDetecting ? `${fps} fps` : 'idle'}>Camera workspace</SectionLabel>
-            <Panel className="p-3 sm:p-5">
-              <CameraStage
-                videoRef={videoRef}
-                faceRef={lastFaceRef}
-                handsRef={lastHandsRef}
-                poseRef={lastPoseRef}
-                statusColor={color}
-                light
-                fps={isDetecting ? fps : null}
-              />
-              <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[#233b35]/10 pt-4">
-                <span className="flex items-center gap-2 text-xs text-[#67746d]">
-                  <span className={`h-2 w-2 rounded-full ${isDetecting ? 'bg-[#70a999]' : 'bg-[#b8c2ba]'}`} />
-                  {isDetecting ? `Session running · ${formatElapsed(elapsedSec)}` : 'Camera idle'}
-                </span>
-              </div>
-            </Panel>
-            <div className="mt-5">
-              <PrivacyPanel>
-                <strong className="font-semibold text-[#356459]">Private by default.</strong> Video frames never leave
-                your browser tab — only small numeric landmark coordinates are sent to the backend running on your own
-                machine, never an image or frame.
-              </PrivacyPanel>
-            </div>
-          </div>
+        <div className="grid lg:grid-cols-[1fr_360px] gap-8">
+          <CameraStage
+            videoRef={videoRef}
+            faceRef={lastFaceRef}
+            handsRef={lastHandsRef}
+            poseRef={lastPoseRef}
+            statusColor={color}
+          />
 
-          <aside className={`${tab === 'details' ? '' : 'hidden lg:block'} space-y-5`}>
-            <SectionLabel detail="top signal only">Current state</SectionLabel>
-            <Panel className="flex flex-col items-center p-5 sm:p-7">
-              <div className="flex items-center gap-2">
-                <StatusBadge tone={badgeTone}>{badgeKicker}</StatusBadge>
+          <div className="space-y-6">
+            <motion.div {...cardIn()} className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5">
+              <div className="text-xs uppercase tracking-wide text-white/40 mb-3">Current state</div>
+              <div className="relative h-32 -mx-2">
                 {isDetecting && (
-                  <span className="font-mono text-[10px] text-[#859089]">
-                    {Math.round(currentConfidence * 100)}% confidence
-                  </span>
+                  <div
+                    className="absolute inset-8 rounded-full blur-2xl animate-pulse transition-colors duration-700"
+                    style={{ backgroundColor: `${color}22` }}
+                  />
                 )}
+                <AuraOrb className="relative w-full h-full" />
               </div>
-              <div className="relative h-52 w-52 sm:h-60 sm:w-60 my-4">
-                <AuraOrb className="w-full h-full" palette={ORB_PALETTE} particleColor="#8fb6ab" />
-              </div>
-              <motion.div key={currentLabel} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="-mt-1 text-center">
-                <h2 className="font-display text-2xl tracking-[-.03em] text-[#1c3731]">
+              <motion.div
+                key={currentLabel}
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-2 text-center"
+              >
+                <div className="text-lg font-medium" style={{ color }}>
                   {LABELS[currentLabel] || 'Watching…'}
-                </h2>
-                <p className="mx-auto mt-2 max-w-xs text-xs leading-relaxed text-[#718078]">
-                  {isDetecting ? liveCopy(currentLabel) : 'Start a session to begin a local, private read of your patterns.'}
-                </p>
+                </div>
+                <div className="text-xs text-white/40 mt-0.5">
+                  {isDetecting ? `${Math.round(currentConfidence * 100)}% confidence` : 'Session not running'}
+                </div>
               </motion.div>
-              <div className="mt-5 grid w-full grid-cols-2 gap-2 border-t border-[#233b35]/10 pt-4 text-center">
-                <div>
-                  <span className="block font-mono text-lg text-[#315c51]">
-                    {isDetecting ? `${Math.round(currentConfidence * 100)}%` : '—'}
-                  </span>
-                  <span className="text-[10px] text-[#859089]">confidence</span>
-                </div>
-                <div>
-                  <span className="block font-mono text-lg text-[#315c51]">{formatElapsed(elapsedSec)}</span>
-                  <span className="text-[10px] text-[#859089]">session time</span>
-                </div>
-              </div>
-            </Panel>
+            </motion.div>
 
             {modelInfo?.per_habit && (
-              <Panel className="p-4">
-                <SectionLabel detail="today">Model blend</SectionLabel>
-                <div className="space-y-3">
-                  {Object.entries(modelInfo.per_habit)
-                    .filter(([h]) => h !== 'none')
-                    .map(([habit, info]) => {
-                      const pct = Math.round(info.blend_weight * 100)
-                      return (
-                        <div key={habit}>
-                          <div className="mb-1 flex justify-between text-[11px] text-[#64736b]">
-                            <span>{LABELS[habit] || habit}</span>
-                            <span className="font-mono">{pct}% · {info.real_samples} samples</span>
-                          </div>
-                          <div className="h-1.5 overflow-hidden rounded-full bg-[#e0e6dd]">
-                            <div className="h-full rounded-full bg-[#6da497]" style={{ width: `${pct}%` }} />
-                          </div>
-                        </div>
-                      )
-                    })}
-                </div>
-                <p className="text-[11px] text-[#8a948d] mt-3 leading-relaxed">
+              <motion.div {...cardIn(0.06)} className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5 text-sm">
+                <div className="text-xs uppercase tracking-wide text-white/40 mb-3">Model status</div>
+                {Object.entries(modelInfo.per_habit)
+                  .filter(([h]) => h !== 'none')
+                  .map(([habit, info]) => (
+                    <Row
+                      key={habit}
+                      label={LABELS[habit] || habit}
+                      value={`${Math.round(info.blend_weight * 100)}% personal, ${info.real_samples} samples`}
+                    />
+                  ))}
+                <p className="text-[11px] text-white/35 mt-3 leading-relaxed">
                   Each habit blends a shared geometric prior with a model trained only on your own
-                  calibration samples once you have enough of them (8+). 0% means it's running on
-                  the general prior only — head to Calibrate to change that.
+                  calibration samples once you have enough of them (8+). 0% personal means it's
+                  running on the general prior only — head to Calibrate to change that.
                 </p>
-              </Panel>
+              </motion.div>
             )}
 
             {(posture.enabled || audio.enabled) && isDetecting && (
-              <Panel className="p-4 space-y-3">
-                <SectionLabel>Posture & audio (experimental)</SectionLabel>
+              <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5 space-y-3">
+                <div className="text-xs uppercase tracking-wide text-white/40">Posture & audio (experimental)</div>
                 {posture.enabled && (
                   <div className="flex items-center gap-2.5 text-sm">
-                    <PersonStanding size={15} className={postureStatus?.isSlouching ? 'text-[#c2685f]' : 'text-[#6f9db7]'} />
-                    <span className="text-[#4e6158]">
+                    <PersonStanding size={15} className={postureStatus?.isSlouching ? 'text-aura-alert' : 'text-aura-watch'} />
+                    <span className="text-white/70">
                       {!postureStatus?.hasBaseline
                         ? 'Capturing your baseline posture…'
                         : postureStatus.isSlouching
@@ -248,41 +201,32 @@ export default function Live() {
                 )}
                 {audio.enabled && (
                   <div className="flex items-center gap-3 text-sm">
-                    <Ear size={15} className="text-[#6f9db7] shrink-0" />
-                    <span className="text-[#4e6158]">Listening for grinding/cracking sounds</span>
-                    <Waveform bars={audioBars} color="#6f9db7" className="ml-auto" />
+                    <Ear size={15} className="text-aura-watch shrink-0" />
+                    <span className="text-white/70">Listening for grinding/cracking sounds</span>
+                    <Waveform bars={audioBars} className="ml-auto" />
                   </div>
                 )}
-              </Panel>
+              </div>
             )}
-          </aside>
-        </div>
 
-        <div className="mt-7 grid gap-7 lg:grid-cols-[minmax(0,1.65fr)_minmax(330px,.9fr)]">
-          <div className="hidden lg:block" />
-          <div className={tab === 'details' ? '' : 'hidden lg:block'}>
-            <Panel className="p-4">
-              <SectionLabel detail={`${sessionEvents.length} logged`}>Session events</SectionLabel>
+            <motion.div {...cardIn(0.1)} className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5">
+              <div className="text-xs uppercase tracking-wide text-white/40 mb-3">This session</div>
               {sessionEvents.length === 0 ? (
-                <p className="py-5 text-center text-xs text-[#7b877f]">No sustained detections yet.</p>
+                <p className="text-sm text-white/35">No sustained detections yet.</p>
               ) : (
-                <ul className="divide-y divide-[#233b35]/8 max-h-80 overflow-y-auto scrollbar-thin pr-1">
+                <ul className="space-y-2 max-h-80 overflow-y-auto scrollbar-thin pr-1">
                   {sessionEvents.map((ev) => (
-                    <li key={ev.id} className="py-3 first:pt-1 last:pb-1">
-                      <div className="flex items-center gap-3">
-                        <span className="font-mono text-[10px] text-[#8a948d]">
-                          {new Date(ev.startedAt * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: STATUS_COLOR[ev.habit] || STATUS_COLOR.none }} />
-                        <span className="flex-1 text-xs text-[#4e6158]">{LABELS[ev.habit] || ev.habit}</span>
-                        <span className="font-mono text-[10px] text-[#8b958f]">{ev.durationSec.toFixed(1)}s</span>
+                    <li key={ev.id} className="border-b border-white/[0.05] pb-2 last:border-0">
+                      <div className="flex items-center justify-between text-sm">
+                        <span>{LABELS[ev.habit] || ev.habit}</span>
+                        <span className="text-white/40 text-xs">{ev.durationSec.toFixed(1)}s</span>
                       </div>
                       <TriggerNote event={ev} />
                     </li>
                   ))}
                 </ul>
               )}
-            </Panel>
+            </motion.div>
           </div>
         </div>
 
@@ -291,7 +235,6 @@ export default function Live() {
     </div>
   )
 }
-
 
 /** Phase 6: per-event trigger note -- "what was happening right before this."
  * Only editable once the event has a server-assigned id (i.e. the backend
@@ -320,14 +263,14 @@ function TriggerNote({ event }) {
     return event.notes ? (
       <button
         onClick={() => setEditing(true)}
-        className="text-left text-xs text-[#7c8880] hover:text-[#47796e] mt-1 leading-relaxed"
+        className="text-left text-xs text-white/45 hover:text-white/70 mt-1 leading-relaxed"
       >
         “{event.notes}”
       </button>
     ) : (
       <button
         onClick={() => setEditing(true)}
-        className="flex items-center gap-1 text-[11px] text-[#9aa39c] hover:text-[#47796e] mt-1"
+        className="flex items-center gap-1 text-[11px] text-white/30 hover:text-white/60 mt-1"
       >
         <MessageSquarePlus size={11} /> What was happening right before this?
       </button>
@@ -342,15 +285,24 @@ function TriggerNote({ event }) {
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => e.key === 'Enter' && save()}
         placeholder="e.g. stressed reading email"
-        className="flex-1 bg-white/60 border border-[#233b35]/15 rounded-lg px-2.5 py-1 text-xs text-[#33453f] placeholder:text-[#9aa39c] focus:outline-none focus:border-[#5b988b]/50"
+        className="flex-1 bg-white/[0.04] border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white/80 placeholder:text-white/25 focus:outline-none focus:border-aura-calm/40"
       />
       <button
         onClick={save}
         disabled={saving}
-        className="text-[11px] text-[#3f7a6d] hover:text-[#3f7a6d]/80 disabled:opacity-50"
+        className="text-[11px] text-aura-calm hover:text-aura-calm/80 disabled:opacity-50"
       >
         Save
       </button>
+    </div>
+  )
+}
+
+function Row({ label, value }) {
+  return (
+    <div className="flex items-center justify-between py-1">
+      <span className="text-white/50 text-xs">{label}</span>
+      <span className="font-mono text-xs">{value}</span>
     </div>
   )
 }
