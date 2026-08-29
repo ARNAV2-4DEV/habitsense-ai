@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { FACE_REGIONS, hairlineRegionPoints, findNearestContact } from '../../lib/featureExtraction'
 import { scheduleVideoFrameLoop, cancelVideoFrameLoop } from '../../lib/videoFrameLoop'
+import { createLandmarkSmoother, createHandsSmoother } from '../../lib/oneEuroFilter'
 
 // Every mesh landmark index the classifier actually reads across all named
 // regions (mouth, cheeks, jaw, eyebrows/forehead, nose) -- deduped so each
@@ -72,6 +73,14 @@ export default function CameraStage({ videoRef, faceRef, handsRef, poseRef, stat
   const canvasRef = useRef(null)
   const colorRef = useRef(statusColor)
 
+  // Display-only smoothing (see lib/oneEuroFilter.js): kills per-frame
+  // landmark jitter in what gets drawn without touching the raw points
+  // useDetectionEngine/useCalibrationCapture feed to the actual classifier,
+  // so this is purely a visual polish, never a detection-accuracy trade-off.
+  const smoothFaceRef = useRef(createLandmarkSmoother({ minCutoff: 1.4, beta: 1.2 }))
+  const smoothHandsRef = useRef(createHandsSmoother({ minCutoff: 1.6, beta: 2.0 }))
+  const smoothPoseRef = useRef(createLandmarkSmoother({ minCutoff: 1.2, beta: 0.8 }))
+
   // statusColor still arrives as a normal prop (it only changes a few times
   // a second on real classification changes, not per-frame) -- mirrored
   // into a ref so updating it doesn't restart the draw loop's effect either.
@@ -84,9 +93,10 @@ export default function CameraStage({ videoRef, faceRef, handsRef, poseRef, stat
     const draw = () => {
       const canvas = canvasRef.current
       const video = videoRef.current
-      const face = faceRef.current
-      const hands = handsRef.current
-      const pose = poseRef?.current
+      const now = performance.now() / 1000
+      const face = smoothFaceRef.current(faceRef.current, now)
+      const hands = smoothHandsRef.current(handsRef.current, now)
+      const pose = smoothPoseRef.current(poseRef?.current, now)
       const statusColor = colorRef.current
       if (canvas && video && video.videoWidth) {
         if (canvas.width !== video.videoWidth) canvas.width = video.videoWidth
