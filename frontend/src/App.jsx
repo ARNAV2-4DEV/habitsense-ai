@@ -1,3 +1,4 @@
+import { Suspense, lazy } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useLocation } from 'react-router-dom'
@@ -5,12 +6,27 @@ import Sidebar from './components/layout/Sidebar'
 import MobileNav from './components/layout/MobileNav'
 import ConsentModal from './components/ConsentModal'
 import { useLenis } from './hooks/useLenis'
-import Home from './pages/Home'
-import Live from './pages/Live'
-import Calibrate from './pages/Calibrate'
-import Dashboard from './pages/Dashboard'
-import Settings from './pages/Settings'
-import About from './pages/About'
+
+// Route-level code splitting: each page pulls in a different set of heavy,
+// page-specific libraries (three.js/r3f + gsap on Home, MediaPipe + three on
+// Live, recharts on Dashboard, gsap on About) that were previously all
+// bundled into one ~1.9MB chunk loaded up front regardless of which page you
+// landed on. Lazy-loading per route means e.g. visiting Settings never pays
+// for MediaPipe or recharts at all.
+const Home = lazy(() => import('./pages/Home'))
+const Live = lazy(() => import('./pages/Live'))
+const Calibrate = lazy(() => import('./pages/Calibrate'))
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const Settings = lazy(() => import('./pages/Settings'))
+const About = lazy(() => import('./pages/About'))
+
+function RouteFallback() {
+  return (
+    <div className="flex items-center justify-center min-h-[60vh]">
+      <div className="w-6 h-6 rounded-full border-2 border-white/15 border-t-aura-calm animate-spin" />
+    </div>
+  )
+}
 
 function PageTransition({ children }) {
   return (
@@ -20,7 +36,10 @@ function PageTransition({ children }) {
       exit={{ opacity: 0, y: -8 }}
       transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
     >
-      {children}
+      {/* Suspense lives per-route (not wrapping <Routes> itself) so
+          AnimatePresence's direct child stays the keyed <Routes>, which is
+          what lets it detect and animate route transitions at all. */}
+      <Suspense fallback={<RouteFallback />}>{children}</Suspense>
     </motion.div>
   )
 }
