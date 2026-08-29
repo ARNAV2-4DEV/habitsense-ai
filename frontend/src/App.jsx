@@ -1,10 +1,11 @@
 import { Suspense, lazy } from 'react'
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Link } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useLocation } from 'react-router-dom'
 import Sidebar from './components/layout/Sidebar'
 import MobileNav from './components/layout/MobileNav'
 import ConsentModal from './components/ConsentModal'
+import ErrorBoundary from './components/ErrorBoundary'
 import { useLenis } from './hooks/useLenis'
 
 // Route-level code splitting: each page pulls in a different set of heavy,
@@ -24,6 +25,21 @@ function RouteFallback() {
   return (
     <div className="flex items-center justify-center min-h-[60vh]">
       <div className="w-6 h-6 rounded-full border-2 border-white/15 border-t-aura-calm animate-spin" />
+    </div>
+  )
+}
+
+function NotFound() {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[70vh] text-center px-6">
+      <div className="font-display text-6xl mb-3 text-white/20">404</div>
+      <p className="text-white/50 mb-6">There's nothing tracked at this address.</p>
+      <Link
+        to="/"
+        className="inline-flex items-center gap-2 text-sm border border-white/15 rounded-full px-4 py-2 text-white/70 hover:text-white hover:border-white/30 transition-colors"
+      >
+        Back to overview
+      </Link>
     </div>
   )
 }
@@ -53,16 +69,21 @@ export default function App() {
       <div className="grain-overlay" />
       <Sidebar />
       <main className="flex-1 min-w-0 pb-20 md:pb-0 relative">
-        <AnimatePresence mode="wait">
-          <Routes location={location} key={location.pathname}>
-            <Route path="/" element={<PageTransition><Home /></PageTransition>} />
-            <Route path="/live" element={<PageTransition><Live /></PageTransition>} />
-            <Route path="/calibrate" element={<PageTransition><Calibrate /></PageTransition>} />
-            <Route path="/dashboard" element={<PageTransition><Dashboard /></PageTransition>} />
-            <Route path="/settings" element={<PageTransition><Settings /></PageTransition>} />
-            <Route path="/about" element={<PageTransition><About /></PageTransition>} />
-          </Routes>
-        </AnimatePresence>
+        {/* Keyed by pathname so navigating away from a page that crashed
+            always recovers cleanly, not just the in-place "Try again" button. */}
+        <ErrorBoundary key={location.pathname}>
+          <AnimatePresence mode="wait">
+            <Routes location={location} key={location.pathname}>
+              <Route path="/" element={<PageTransition><Home /></PageTransition>} />
+              <Route path="/live" element={<PageTransition><Live /></PageTransition>} />
+              <Route path="/calibrate" element={<PageTransition><Calibrate /></PageTransition>} />
+              <Route path="/dashboard" element={<PageTransition><Dashboard /></PageTransition>} />
+              <Route path="/settings" element={<PageTransition><Settings /></PageTransition>} />
+              <Route path="/about" element={<PageTransition><About /></PageTransition>} />
+              <Route path="*" element={<PageTransition><NotFound /></PageTransition>} />
+            </Routes>
+          </AnimatePresence>
+        </ErrorBoundary>
       </main>
       <MobileNav />
       <ConsentModal />
