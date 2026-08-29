@@ -134,7 +134,14 @@ function Particles() {
 export default function AuraOrb({ className = '' }) {
   return (
     <div className={className}>
-      <Canvas camera={{ position: [0, 0, 5], fov: 45 }} gl={{ antialias: true, alpha: true }}>
+      {/* antialias off: this canvas is always small (a status panel, not a
+          hero visual) and runs continuously for the whole session, on the
+          same GPU MediaPipe's own delegate is using -- MSAA cost here buys
+          very little visible smoothing at this size for real concurrent
+          GPU budget. (r3f already caps dpr at [1,2] by default, so that
+          axis was already reasonable -- verified in its own source rather
+          than assumed.) */}
+      <Canvas camera={{ position: [0, 0, 5], fov: 45 }} gl={{ antialias: false, alpha: true }}>
         <ambientLight intensity={0.6} />
         <pointLight position={[3, 3, 3]} intensity={0.8} />
         <Orb />
