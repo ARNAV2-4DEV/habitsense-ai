@@ -26,8 +26,6 @@ export function useDetectionEngine() {
   const openEventsRef = useRef({}) // habit -> { startedAt, maxConfidence }
   const activeStreakRef = useRef({}) // habit -> seconds sustained above threshold this "bout"
   const lastFrameTimeRef = useRef(performance.now())
-  const fpsEmaRef = useRef(0)
-  const lastFpsUpdateRef = useRef(0)
 
   // Raw per-frame landmarks -- mutated up to 60x/sec by the loop below.
   // Deliberately refs, not state: they only feed CameraStage's own
@@ -54,7 +52,6 @@ export function useDetectionEngine() {
   const [postureStatus, setPostureStatus] = useState(null) // { hasBaseline, isSlouching }
   const [audioBars, setAudioBars] = useState(null) // live spectrum, for the waveform visualizer only
   const [latestProbabilities, setLatestProbabilities] = useState(null)
-  const [fps, setFps] = useState(0)
 
   const {
     profileId,
@@ -199,8 +196,6 @@ export function useDetectionEngine() {
     lastPoseRef.current = null
     postureStatusRef.current = null
     setPostureStatus(null)
-    fpsEmaRef.current = 0
-    setFps(0)
 
     const sid = useStore.getState().sessionId
     if (sid) {
@@ -277,26 +272,15 @@ export function useDetectionEngine() {
         return
       }
 
-      // Real fps -- see the throttled setFps below, and note this is now
+      // dtSec is real elapsed time since the last processed frame -- this is
       // the camera's actual delivery rate (commonly ~30/sec), not the
-      // display's refresh rate (commonly 60/sec): MediaPipe inference is
-      // the most expensive step in this loop, and re-running it on a video
-      // frame that hasn't changed since the last tick was pure waste.
+      // display's refresh rate: MediaPipe inference is the most expensive
+      // step in this loop, and re-running it on a video frame that hasn't
+      // changed since the last tick was pure waste. Used below for the
+      // dwell/streak timing (posture, audio, habit events).
       const now = performance.now()
       const dtSec = Math.max(0, (now - lastFrameTimeRef.current) / 1000)
       lastFrameTimeRef.current = now
-
-      // Real fps, smoothed (EMA) so it doesn't jitter frame-to-frame, and
-      // only pushed to state ~4x/sec -- displaying it doesn't need per-frame
-      // precision and setState every rAF tick would just add render churn.
-      if (dtSec > 0) {
-        const instantFps = 1 / dtSec
-        fpsEmaRef.current = fpsEmaRef.current ? fpsEmaRef.current * 0.9 + instantFps * 0.1 : instantFps
-        if (now - lastFpsUpdateRef.current > 250) {
-          lastFpsUpdateRef.current = now
-          setFps(Math.round(fpsEmaRef.current))
-        }
-      }
 
       const postureCfg = useStore.getState().posture
       const wantPose = postureCfg.enabled && worker.poseReady
@@ -420,7 +404,6 @@ export function useDetectionEngine() {
     postureStatus,
     audioBars,
     latestProbabilities,
-    fps,
     extractorRef,
     checkBackend,
   }

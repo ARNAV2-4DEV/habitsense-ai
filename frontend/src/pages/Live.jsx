@@ -47,7 +47,7 @@ const LABELS = {
 }
 
 export default function Live() {
-  const { videoRef, start, stop, loadingMsg, error, lastFaceRef, lastHandsRef, lastPoseRef, postureStatus, audioBars, fps } =
+  const { videoRef, start, stop, loadingMsg, error, lastFaceRef, lastHandsRef, lastPoseRef, postureStatus, audioBars } =
     useDetectionEngine()
   const isDetecting = useStore((s) => s.isDetecting)
   const currentLabel = useStore((s) => s.currentLabel)
@@ -80,11 +80,6 @@ export default function Live() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {isDetecting && (
-              <span className="text-[11px] font-mono text-white/35" title="Real detection-loop fps, smoothed">
-                {fps} fps
-              </span>
-            )}
             {!isDetecting ? (
               <MagneticButton
                 onClick={start}
