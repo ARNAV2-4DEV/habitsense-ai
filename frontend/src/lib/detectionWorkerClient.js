@@ -8,9 +8,7 @@
 let nextRequestId = 1
 
 export function createDetectionWorkerClient() {
-  // No `{ type: 'module' }` here -- see the long comment at the top of
-  // mediapipeWorker.js for why this has to be a classic worker.
-  const worker = new Worker(new URL('../workers/mediapipeWorker.js', import.meta.url))
+  const worker = new Worker(new URL('../workers/mediapipeWorker.js', import.meta.url), { type: 'module' })
 
   const pendingDetect = new Map() // requestId -> {resolve, reject}
   let readyWaiters = [] // {resolve, reject}

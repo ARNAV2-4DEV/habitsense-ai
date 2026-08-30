@@ -9,26 +9,42 @@
  * ImageBitmap is a valid MediaPipe Tasks Vision image source, same as an
  * HTMLVideoElement, so detectFrame/detectPose need no changes.
  */
-// Deliberately built as a CLASSIC worker at runtime (see how it's
-// constructed in lib/detectionWorkerClient.js, without `{ type: 'module' }`)
-// -- MediaPipe Tasks Vision loads its WASM glue via `importScripts()`, which
-// throws "Module scripts don't support importScripts()" in a module worker;
-// its fallback there (dynamically `import()`-ing the glue script as an ES
-// module) doesn't work either, because that script assigns its factory with
-// a top-level `var`, which in a real classic script becomes a global
-// (`self.ModuleFactory`) but inside an ES module is just module-scoped -- so
-// the import "succeeds" yet `self.ModuleFactory` is never actually set, and
-// the library throws "ModuleFactory not set." A classic worker lets
-// `importScripts()` work as the library expects.
+// This is a module worker (see lib/detectionWorkerClient.js) so static
+// `import` works consistently in both Vite dev (which always serves workers
+// as native ES modules, regardless of how they're constructed) and a
+// production build (which would otherwise fail to bundle a dynamic
+// `import()` here into IIFE/classic output: "UMD and IIFE output formats
+// are not supported for code-splitting builds").
 //
-// The static import below is fine even though the *output* worker is
-// classic: Vite/Rollup bundle this file (and everything it pulls in,
-// including @mediapipe/tasks-vision) into one self-contained script with no
-// module syntax, rather than trying to split it into multiple chunks -- a
-// dynamic `import()` here instead would force Rollup to code-split, which
-// IIFE/classic output can't do ("UMD and IIFE output formats are not
-// supported for code-splitting builds"), and broke the production build.
+// The catch: MediaPipe Tasks Vision loads its WASM glue via
+// `importScripts()`, which module workers don't support (throws "Module
+// scripts don't support importScripts()"); its own fallback there
+// (dynamically `import()`-ing the glue script as an ES module) doesn't
+// work either, because that script sets its factory with a top-level
+// `var`, which only becomes a real global (`self.ModuleFactory`) under
+// classic-script evaluation -- inside an ES module it's just module-scoped,
+// so the import "succeeds" yet the library still throws "ModuleFactory not
+// set." Fixed below by polyfilling `importScripts` itself with something
+// that behaves like the real (synchronous, global-scope-executing) one,
+// rather than fighting the worker's type.
 import { loadDetectors, detectFrame, loadPoseLandmarker, detectPose } from '../lib/mediapipeSetup'
+
+// Synchronous XHR + indirect eval: indirect eval (the `(0, eval)(...)` form,
+// as opposed to calling `eval` directly) always executes as global code
+// against the real global object, exactly like a classic <script> or a real
+// importScripts() call would -- so `var ModuleFactory = ...` inside the
+// fetched script lands on `self.ModuleFactory`, same as MediaPipe expects.
+self.importScripts = function (...urls) {
+  for (const url of urls) {
+    const xhr = new XMLHttpRequest()
+    xhr.open('GET', url, false)
+    xhr.send(null)
+    if (xhr.status !== 200 && xhr.status !== 0) {
+      throw new Error(`importScripts polyfill: ${url} failed with status ${xhr.status}`)
+    }
+    ;(0, eval)(xhr.responseText)
+  }
+}
 
 let detectors = null
 let poseLandmarker = null
