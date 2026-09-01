@@ -6,14 +6,17 @@ import { createAudioMonitor } from '../lib/audioDetection'
 import { api } from '../lib/api'
 import { useStore } from '../state/store'
 import { requestConsent } from '../lib/consent'
-import { scheduleVideoFrameLoop, cancelVideoFrameLoop } from '../lib/videoFrameLoop'
+import { scheduleVideoFrameLoop, cancelVideoFrameLoop, scheduleImmediate } from '../lib/videoFrameLoop'
 
 const BACKEND_POLL_MS = 200 // ~5 calls/sec to the local classifier — plenty for dwell-smoothed detection
 
 export function useDetectionEngine() {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
-  const rafRef = useRef(null)
+  const loopHandleRef = useRef(null)
+  // Bumped on every stop(): ticks captured under an older id bail out rather
+  // than rescheduling themselves against a torn-down video element.
+  const runIdRef = useRef(0)
   // Holds the MediaPipe worker client (see lib/detectionWorkerClient.js):
   // face/hand/pose inference now runs on a dedicated worker thread instead
   // of blocking this thread's rendering/animation work every frame. Kept in
@@ -70,6 +73,11 @@ export function useDetectionEngine() {
 
   const store = useStore()
 
+  const cancelLoop = useCallback(() => {
+    cancelVideoFrameLoop(loopHandleRef.current)
+    loopHandleRef.current = null
+  }, [])
+
   const checkBackend = useCallback(async () => {
     try {
       await api.health()
@@ -79,6 +87,29 @@ export function useDetectionEngine() {
       useStore.getState().setBackendOnline(false)
       return false
     }
+  }, [])
+
+  /**
+   * Every habit key this session can actually emit an event for, across all
+   * three independent gates: the `enabledHabits` map (the landmark habits),
+   * the posture switch, and the audio switch.
+   *
+   * Deliberately reports what is RUNNING, not what is merely configured --
+   * posture only counts once its model is loaded, and the audio habits only
+   * once the microphone actually started, since a declined mic prompt leaves
+   * audio.enabled true while nothing can ever fire. Call this after the
+   * models and the mic have been brought up.
+   */
+  const activeHabitKeys = useCallback(() => {
+    const s = useStore.getState()
+    const keys = Object.entries(s.enabledHabits)
+      .filter(([, v]) => v)
+      .map(([k]) => k)
+    if (s.posture.enabled && workerRef.current?.poseReady) keys.push('posture_slouching')
+    if (s.audio.enabled && audioMonitorRef.current.isRunning) {
+      keys.push('teeth_grinding', 'knuckle_cracking')
+    }
+    return keys
   }, [])
 
   const start = useCallback(async () => {
@@ -122,9 +153,13 @@ export function useDetectionEngine() {
 
       await checkBackend()
 
-      const habitsOn = Object.entries(useStore.getState().enabledHabits)
-        .filter(([, v]) => v)
-        .map(([k]) => k)
+      // Posture and the audio habits live outside `enabledHabits` -- they're
+      // gated by their own posture.enabled / audio.enabled switches and go
+      // straight through updateStreak. That meant they logged events into
+      // sessions whose habits_enabled list never mentioned them, so the
+      // session record disagreed with its own events about what was being
+      // watched. Declare whatever is actually running, from all three gates.
+      const habitsOn = activeHabitKeys()
       const { session_id } = await api
         .startSession(useStore.getState().profileId, habitsOn)
         .catch(() => ({ session_id: null }))
@@ -136,6 +171,7 @@ export function useDetectionEngine() {
       openEventsRef.current = {}
       activeStreakRef.current = {}
       lastFrameTimeRef.current = performance.now()
+      runIdRef.current += 1 // new session generation; fences ticks from a stopped session
 
       setLoadingMsg(null)
       useStore.getState().setDetecting(true)
@@ -181,8 +217,10 @@ export function useDetectionEngine() {
   }, [])
 
   const stop = useCallback(async () => {
-    cancelVideoFrameLoop(rafRef.current)
-    rafRef.current = null
+    // Fence first, then cancel: a tick already awaiting inference will still
+    // resume, and the bumped id is what stops it rescheduling itself.
+    runIdRef.current += 1
+    cancelLoop()
     const nowSec = Date.now() / 1000
     for (const habit of Object.keys(openEventsRef.current)) {
       await closeOpenEvent(habit, nowSec)
@@ -205,7 +243,7 @@ export function useDetectionEngine() {
     useStore.getState().setSessionId(null)
     useStore.getState().setDetecting(false)
     useStore.getState().setCurrentDetection('none', 0)
-  }, [closeOpenEvent])
+  }, [closeOpenEvent, cancelLoop])
 
   // Shared dwell/event machinery: an "active" boolean sustained for at least
   // minDwell seconds opens a logged event and fires the reminder toast; once
@@ -257,10 +295,39 @@ export function useDetectionEngine() {
   )
 
   const loop = useCallback(() => {
+    const runId = runIdRef.current
+
+    // Video time of the frame the last tick actually captured, so the
+    // scheduler below can tell "a new frame is waiting" from "nothing new
+    // has arrived yet".
+    let lastCapturedTime = -1
+
+    /**
+     * requestVideoFrameCallback earns its keep only while inference is
+     * FASTER than the camera delivers -- it stops us re-running the models
+     * on a frame that hasn't changed. Measured here, inference is slower
+     * (~40ms against a 33ms frame interval), and in that regime waiting for
+     * the next rVFC means idling ~20ms per cycle while an already-decoded
+     * frame sits unprocessed. That is what pinned the loop to every other
+     * camera frame -- a hard 15fps against a 30fps camera.
+     *
+     * So: if a newer frame is already available, take it now; otherwise wait
+     * for the next one. Self-tuning, and it keeps the anti-backlog property
+     * that matters -- at most one frame is ever in flight, so a slow frame
+     * can never queue up stale work whose results land against newer video.
+     */
+    const scheduleNext = (video) => {
+      loopHandleRef.current =
+        video && video.currentTime !== lastCapturedTime
+          ? scheduleImmediate(tick)
+          : scheduleVideoFrameLoop(video, tick)
+    }
+
     // Not async: the backend call below is intentionally fire-and-forget
     // (.then()/.catch(), never awaited) so a slow network response can
     // never delay the next frame.
     const tick = async () => {
+      if (runId !== runIdRef.current) return // session stopped underneath us
       const video = videoRef.current
       const worker = workerRef.current
       if (!video || !worker || !worker.ready || video.readyState < 2) {
@@ -268,16 +335,13 @@ export function useDetectionEngine() {
         // fire at all before the video actually starts playing, which
         // would stall this readiness poll indefinitely. Once past this
         // check, scheduling below switches to frame-synced timing.
-        rafRef.current = { kind: 'raf', id: requestAnimationFrame(tick) }
+        loopHandleRef.current = { kind: 'raf', id: requestAnimationFrame(tick) }
         return
       }
 
-      // dtSec is real elapsed time since the last processed frame -- this is
-      // the camera's actual delivery rate (commonly ~30/sec), not the
-      // display's refresh rate: MediaPipe inference is the most expensive
-      // step in this loop, and re-running it on a video frame that hasn't
-      // changed since the last tick was pure waste. Used below for the
-      // dwell/streak timing (posture, audio, habit events).
+      // dtSec is real elapsed time since the last processed frame -- the
+      // camera's actual delivery rate, not the display's refresh rate. Used
+      // below for the dwell/streak timing (posture, audio, habit events).
       const now = performance.now()
       const dtSec = Math.max(0, (now - lastFrameTimeRef.current) / 1000)
       lastFrameTimeRef.current = now
@@ -285,21 +349,35 @@ export function useDetectionEngine() {
       const postureCfg = useStore.getState().posture
       const wantPose = postureCfg.enabled && worker.poseReady
 
-      // createImageBitmap is a cheap, hardware-accelerated frame copy (a
-      // few ms at most) -- unlike the inference it feeds, it's fine to do
-      // here, and transferring the bitmap (zero-copy) to the worker is what
-      // lets the actual detectForVideo calls run off this thread entirely.
+      // The client captures one cheap, hardware-accelerated ImageBitmap per
+      // model and transfers them (zero-copy) to one worker each, so face and
+      // hand inference overlap instead of running back to back.
+      //
+      // They are joined with Promise.all rather than run on independent
+      // loops. That was measured both ways: decoupling them so neither waits
+      // on the other moved overlay lag 69.3ms -> 66.8ms, i.e. nothing, while
+      // the face model itself went 29.5ms -> 38.4ms. The GPU is saturated --
+      // the two models serialize in the driver regardless of which thread
+      // issues them -- so independent loops buy noise in exchange for real
+      // complexity and a face/hand temporal skew in the classifier features.
+      //
+      // Awaiting the joined result before scheduling the next tick is also
+      // what caps in-flight work at one frame, so a slow frame can never
+      // build a queue of stale bitmaps landing against newer video.
       let face, hands, pose
+      // Which frame this tick is about to consume, in the video's own clock,
+      // so scheduleNext() can tell whether a newer one has arrived since.
+      lastCapturedTime = video.currentTime
       try {
-        const bitmap = await createImageBitmap(video)
-        ;({ face, hands, pose } = await worker.detect(bitmap, now, wantPose))
+        ;({ face, hands, pose } = await worker.detect(video, now, wantPose))
       } catch {
         // Frame capture/detection failed for this tick (e.g. a transient
         // decode hiccup) -- skip it, same as the old code implicitly did
         // whenever a frame wasn't ready; next scheduled tick just tries again.
-        rafRef.current = scheduleVideoFrameLoop(video, tick)
+        if (runId === runIdRef.current) scheduleNext(video)
         return
       }
+      if (runId !== runIdRef.current) return
       lastFaceRef.current = face
       lastHandsRef.current = hands
 
@@ -379,16 +457,19 @@ export function useDetectionEngine() {
           })
       }
 
-      rafRef.current = scheduleVideoFrameLoop(video, tick)
+      scheduleNext(video)
     }
-    rafRef.current = scheduleVideoFrameLoop(videoRef.current, tick)
+
+    tick()
   }, [handleClassification, updateStreak])
 
   useEffect(() => {
     return () => {
-      cancelVideoFrameLoop(rafRef.current)
+      runIdRef.current += 1
+      cancelLoop()
       workerRef.current?.terminate()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return {

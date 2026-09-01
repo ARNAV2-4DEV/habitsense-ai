@@ -27,7 +27,21 @@
 // set." Fixed below by polyfilling `importScripts` itself with something
 // that behaves like the real (synchronous, global-scope-executing) one,
 // rather than fighting the worker's type.
-import { loadDetectors, detectFrame, loadPoseLandmarker, detectPose } from '../lib/mediapipeSetup'
+//
+// One worker instance owns exactly ONE landmarker (see the `role` on the
+// init message). The client spawns one per model so face and hand inference
+// run concurrently on separate threads instead of back to back on a single
+// one -- sequential execution was costing the sum of both models' time
+// (~70ms measured), which exceeded the 33ms camera frame budget and forced
+// the detection loop down to every other frame.
+import {
+  loadFaceLandmarker,
+  loadHandLandmarker,
+  detectFace,
+  detectHands,
+  loadPoseLandmarker,
+  detectPose,
+} from '../lib/mediapipeSetup'
 
 // Synchronous XHR + indirect eval: indirect eval (the `(0, eval)(...)` form,
 // as opposed to calling `eval` directly) always executes as global code
@@ -46,28 +60,32 @@ self.importScripts = function (...urls) {
   }
 }
 
-let detectors = null
-let poseLandmarker = null
+let role = null
+let landmarker = null
+
+const LOADERS = {
+  face: loadFaceLandmarker,
+  hand: loadHandLandmarker,
+  pose: loadPoseLandmarker,
+}
 
 self.onmessage = async (event) => {
   const msg = event.data
   try {
     if (msg.type === 'init') {
-      detectors = await loadDetectors({
+      role = msg.role
+      landmarker = await LOADERS[role]({
         onProgress: (message) => self.postMessage({ type: 'progress', message }),
       })
-      self.postMessage({ type: 'ready' })
-    } else if (msg.type === 'initPose') {
-      poseLandmarker = await loadPoseLandmarker({
-        onProgress: (message) => self.postMessage({ type: 'progress', message }),
-      })
-      self.postMessage({ type: 'poseReady' })
+      self.postMessage({ type: 'ready', role })
     } else if (msg.type === 'detect') {
-      const { requestId, bitmap, timestampMs, wantPose } = msg
-      const { face, hands } = detectFrame(detectors.faceLandmarker, detectors.handLandmarker, bitmap, timestampMs)
-      const pose = wantPose && poseLandmarker ? detectPose(poseLandmarker, bitmap, timestampMs).pose : null
+      const { requestId, bitmap, timestampMs } = msg
+      let payload
+      if (role === 'face') payload = { face: detectFace(landmarker, bitmap, timestampMs) }
+      else if (role === 'hand') payload = { hands: detectHands(landmarker, bitmap, timestampMs) }
+      else payload = { pose: detectPose(landmarker, bitmap, timestampMs).pose }
       bitmap.close()
-      self.postMessage({ type: 'result', requestId, face, hands, pose })
+      self.postMessage({ type: 'result', requestId, role, ...payload })
     }
   } catch (err) {
     const message = err?.message || String(err)

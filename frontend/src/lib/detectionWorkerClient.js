@@ -1,20 +1,31 @@
 /**
- * Main-thread handle for workers/mediapipeWorker.js. Talks to it purely via
- * postMessage/requestId round trips so useDetectionEngine.js and
- * useCalibrationCapture.js can `await client.detect(bitmap, ts)` as if it
- * were the old synchronous detectFrame() call, without knowing anything
- * about worker plumbing.
+ * Main-thread handle for workers/mediapipeWorker.js.
+ *
+ * One worker per model, deliberately. The face and hand landmarkers used to
+ * share a single worker and ran back to back inside it, so a frame cost
+ * face + hand (measured 37.8ms + 32.1ms = 70.6ms p50). That is over two
+ * camera frame intervals at 30fps, so the detection loop -- which waits for
+ * a result before scheduling the next capture -- could only service every
+ * second or third frame, and the landmarks being drawn were always a couple
+ * of frames stale. Running them on separate threads makes a frame cost
+ * max(face, hand) instead of the sum.
+ *
+ * The loop stays strictly serial per frame (capture -> await all models ->
+ * capture next). That is what keeps a slow frame from building a backlog of
+ * queued bitmaps whose results would be drawn against ever-newer video.
  */
-let nextRequestId = 1
 
-export function createDetectionWorkerClient() {
-  const worker = new Worker(new URL('../workers/mediapipeWorker.js', import.meta.url), { type: 'module' })
+function spawnWorker(role) {
+  // Options must stay a static object literal -- Vite's worker-import-meta-url
+  // plugin parses them at build time and errors on anything computed (so no
+  // interpolated `name` here). The role is sent in the init message instead.
+  const worker = new Worker(new URL('../workers/mediapipeWorker.js', import.meta.url), {
+    type: 'module',
+  })
 
-  const pendingDetect = new Map() // requestId -> {resolve, reject}
-  let readyWaiters = [] // {resolve, reject}
-  let poseReadyWaiters = []
+  const pending = new Map() // requestId -> {resolve, reject}
+  let readyWaiters = []
   let ready = false
-  let poseReady = false
   let onProgress = null
 
   worker.addEventListener('message', (event) => {
@@ -28,33 +39,26 @@ export function createDetectionWorkerClient() {
         readyWaiters.forEach((w) => w.resolve())
         readyWaiters = []
         break
-      case 'poseReady':
-        poseReady = true
-        poseReadyWaiters.forEach((w) => w.resolve())
-        poseReadyWaiters = []
-        break
       case 'result': {
-        const p = pendingDetect.get(msg.requestId)
+        const p = pending.get(msg.requestId)
         if (p) {
-          pendingDetect.delete(msg.requestId)
-          p.resolve({ face: msg.face, hands: msg.hands, pose: msg.pose })
+          pending.delete(msg.requestId)
+          p.resolve(msg)
         }
         break
       }
       case 'error': {
-        const p = pendingDetect.get(msg.requestId)
+        const p = pending.get(msg.requestId)
         if (p) {
-          pendingDetect.delete(msg.requestId)
+          pending.delete(msg.requestId)
           p.reject(new Error(msg.message))
         }
         break
       }
       case 'initError': {
         const err = new Error(msg.message)
-        const waiters = msg.phase === 'init' ? readyWaiters : poseReadyWaiters
-        waiters.forEach((w) => w.reject(err))
-        if (msg.phase === 'init') readyWaiters = []
-        else poseReadyWaiters = []
+        readyWaiters.forEach((w) => w.reject(err))
+        readyWaiters = []
         break
       }
       default:
@@ -68,46 +72,94 @@ export function createDetectionWorkerClient() {
     // failing to load at all) -- fail every in-flight caller instead of
     // leaving their promises hanging forever.
     const wrapped = err instanceof Error ? err : new Error(err?.message || 'MediaPipe worker crashed')
-    for (const p of pendingDetect.values()) p.reject(wrapped)
-    pendingDetect.clear()
+    for (const p of pending.values()) p.reject(wrapped)
+    pending.clear()
     readyWaiters.forEach((w) => w.reject(wrapped))
     readyWaiters = []
-    poseReadyWaiters.forEach((w) => w.reject(wrapped))
-    poseReadyWaiters = []
   })
 
   return {
+    role,
     get ready() {
       return ready
-    },
-    get poseReady() {
-      return poseReady
     },
     init({ onProgress: cb } = {}) {
       onProgress = cb || onProgress
       if (ready) return Promise.resolve()
-      worker.postMessage({ type: 'init' })
+      worker.postMessage({ type: 'init', role })
       return new Promise((resolve, reject) => readyWaiters.push({ resolve, reject }))
     },
-    initPose({ onProgress: cb } = {}) {
-      onProgress = cb || onProgress
-      if (poseReady) return Promise.resolve()
-      worker.postMessage({ type: 'initPose' })
-      return new Promise((resolve, reject) => poseReadyWaiters.push({ resolve, reject }))
-    },
     /** bitmap ownership transfers to the worker -- don't touch it after calling this. */
-    detect(bitmap, timestampMs, wantPose) {
-      const requestId = nextRequestId++
+    detect(requestId, bitmap, timestampMs) {
       return new Promise((resolve, reject) => {
-        pendingDetect.set(requestId, { resolve, reject })
-        worker.postMessage({ type: 'detect', requestId, bitmap, timestampMs, wantPose }, [bitmap])
+        pending.set(requestId, { resolve, reject })
+        worker.postMessage({ type: 'detect', requestId, bitmap, timestampMs }, [bitmap])
       })
     },
     terminate() {
       worker.terminate()
-      pendingDetect.clear()
+      pending.clear()
       readyWaiters = []
-      poseReadyWaiters = []
+    },
+  }
+}
+
+let nextRequestId = 1
+
+export function createDetectionWorkerClient() {
+  const face = spawnWorker('face')
+  const hand = spawnWorker('hand')
+  let pose = null // lazily spawned: posture is opt-in and off by default
+
+  return {
+    get ready() {
+      return face.ready && hand.ready
+    },
+    get poseReady() {
+      return !!pose?.ready
+    },
+    init({ onProgress } = {}) {
+      // Both models download and initialise concurrently too, not just infer.
+      return Promise.all([face.init({ onProgress }), hand.init({ onProgress })])
+    },
+    initPose({ onProgress } = {}) {
+      pose = pose || spawnWorker('pose')
+      return pose.init({ onProgress })
+    },
+    /**
+     * Captures one frame per active model and runs them all concurrently.
+     * Each worker needs its own ImageBitmap because ownership transfers on
+     * postMessage; createImageBitmap measured 0.3ms, so the extra copies are
+     * noise next to the ~35ms of inference they let us overlap.
+     */
+    async detect(video, timestampMs, wantPose) {
+      const requestId = nextRequestId++
+      const usePose = wantPose && pose?.ready
+      // Capture at full resolution. Downscaling the bitmap to 320x240 before
+      // handing it over was measured and made no difference (inference p50
+      // 47.4ms vs 45.5ms at full size) -- the cost is model compute, not the
+      // texture upload -- so there's no reason to give up landmark precision
+      // on small or distant hands for it.
+      const [faceBmp, handBmp, poseBmp] = await Promise.all([
+        createImageBitmap(video),
+        createImageBitmap(video),
+        usePose ? createImageBitmap(video) : Promise.resolve(null),
+      ])
+      const [faceMsg, handMsg, poseMsg] = await Promise.all([
+        face.detect(requestId, faceBmp, timestampMs),
+        hand.detect(requestId, handBmp, timestampMs),
+        usePose ? pose.detect(requestId, poseBmp, timestampMs) : Promise.resolve(null),
+      ])
+      return {
+        face: faceMsg.face,
+        hands: handMsg.hands,
+        pose: poseMsg ? poseMsg.pose : null,
+      }
+    },
+    terminate() {
+      face.terminate()
+      hand.terminate()
+      pose?.terminate()
     },
   }
 }

@@ -32,9 +32,24 @@ export function scheduleVideoFrameLoop(video, tick) {
   return { kind: 'raf', id }
 }
 
+/**
+ * Runs `tick` as soon as the event loop allows, without waiting for a frame
+ * boundary. For the case where a consumer is SLOWER than the camera and a
+ * decoded frame is already sitting there unprocessed: waiting on the next
+ * requestVideoFrameCallback would just idle until the frame after that.
+ * A task (not a microtask) so the compositor, rendering, and any rVFC-driven
+ * draw loop still get to run in between.
+ */
+export function scheduleImmediate(tick) {
+  const id = setTimeout(() => tick(performance.now(), null), 0)
+  return { kind: 'timeout', id }
+}
+
 export function cancelVideoFrameLoop(handle) {
   if (!handle) return
-  if (handle.kind === 'rvfc') {
+  if (handle.kind === 'timeout') {
+    clearTimeout(handle.id)
+  } else if (handle.kind === 'rvfc') {
     try {
       handle.video.cancelVideoFrameCallback(handle.id)
     } catch {

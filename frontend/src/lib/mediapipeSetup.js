@@ -53,14 +53,26 @@ async function createWithDelegateFallback(create, label) {
   }
 }
 
-export async function loadDetectors({ onProgress } = {}) {
-  onProgress?.('Loading vision runtime…')
+async function fileset() {
   visionFileset = visionFileset || (await FilesetResolver.forVisionTasks(WASM_BASE))
+  return visionFileset
+}
 
+/**
+ * Face and hand landmarkers load independently, one per worker, because they
+ * are now run CONCURRENTLY on separate threads rather than back to back on
+ * one. Measured on this machine, running them sequentially in a single
+ * worker cost 37.8ms (face) + 32.1ms (hand) = 70.6ms per frame -- more than
+ * two camera frame intervals at 30fps, which is why the detection loop was
+ * only managing ~15fps and the overlay trailed the video by ~110ms.
+ */
+export async function loadFaceLandmarker({ onProgress } = {}) {
+  onProgress?.('Loading vision runtime…')
+  const vision = await fileset()
   onProgress?.('Loading face landmark model…')
-  const faceLandmarker = await createWithDelegateFallback(
+  return createWithDelegateFallback(
     (delegate) =>
-      FaceLandmarker.createFromOptions(visionFileset, {
+      FaceLandmarker.createFromOptions(vision, {
         baseOptions: { modelAssetPath: FACE_MODEL_URL, delegate },
         runningMode: 'VIDEO',
         numFaces: 1,
@@ -69,41 +81,36 @@ export async function loadDetectors({ onProgress } = {}) {
       }),
     'FaceLandmarker'
   )
+}
 
+export async function loadHandLandmarker({ onProgress } = {}) {
+  onProgress?.('Loading vision runtime…')
+  const vision = await fileset()
   onProgress?.('Loading hand landmark model…')
-  const handLandmarker = await createWithDelegateFallback(
+  return createWithDelegateFallback(
     (delegate) =>
-      HandLandmarker.createFromOptions(visionFileset, {
+      HandLandmarker.createFromOptions(vision, {
         baseOptions: { modelAssetPath: HAND_MODEL_URL, delegate },
         runningMode: 'VIDEO',
         numHands: 2,
       }),
     'HandLandmarker'
   )
-
-  onProgress?.('Ready')
-  return { faceLandmarker, handLandmarker }
 }
 
-/**
- * Runs both landmarkers on a single video frame and returns plain-object
- * landmarks ({x,y,z} in normalized 0..1 image coordinates) matching exactly
- * the shape the backend's InferRequest schema expects.
- */
-export function detectFrame(faceLandmarker, handLandmarker, videoEl, timestampMs) {
-  const faceResult = faceLandmarker.detectForVideo(videoEl, timestampMs)
-  const handResult = handLandmarker.detectForVideo(videoEl, timestampMs)
+/** Normalized 0..1 {x,y,z} landmarks, the shape the backend's InferRequest expects. */
+export function detectFace(faceLandmarker, image, timestampMs) {
+  const result = faceLandmarker.detectForVideo(image, timestampMs)
+  return result.faceLandmarks && result.faceLandmarks.length > 0
+    ? result.faceLandmarks[0].map((p) => ({ x: p.x, y: p.y, z: p.z || 0 }))
+    : null
+}
 
-  const face =
-    faceResult.faceLandmarks && faceResult.faceLandmarks.length > 0
-      ? faceResult.faceLandmarks[0].map((p) => ({ x: p.x, y: p.y, z: p.z || 0 }))
-      : null
-
-  const hands = (handResult.landmarks || []).map((hand) =>
+export function detectHands(handLandmarker, image, timestampMs) {
+  const result = handLandmarker.detectForVideo(image, timestampMs)
+  return (result.landmarks || []).map((hand) =>
     hand.map((p) => ({ x: p.x, y: p.y, z: p.z || 0 }))
   )
-
-  return { face, hands, handedness: handResult.handedness || [] }
 }
 
 /**
@@ -117,11 +124,11 @@ export async function loadPoseLandmarker({ onProgress } = {}) {
   if (!poseLandmarkerPromise) {
     poseLandmarkerPromise = (async () => {
       onProgress?.('Loading vision runtime…')
-      visionFileset = visionFileset || (await FilesetResolver.forVisionTasks(WASM_BASE))
+      const vision = await fileset()
       onProgress?.('Loading posture model…')
       return createWithDelegateFallback(
         (delegate) =>
-          PoseLandmarker.createFromOptions(visionFileset, {
+          PoseLandmarker.createFromOptions(vision, {
             baseOptions: { modelAssetPath: POSE_MODEL_URL, delegate },
             runningMode: 'VIDEO',
             numPoses: 1,

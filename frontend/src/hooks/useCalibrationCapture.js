@@ -80,8 +80,7 @@ export function useCalibrationCapture() {
       if (video && worker?.ready && video.readyState >= 2) {
         const now = performance.now()
         try {
-          const bitmap = await createImageBitmap(video)
-          const { face, hands } = await worker.detect(bitmap, now, false)
+          const { face, hands } = await worker.detect(video, now, false)
           lastFaceRef.current = face
           lastHandsRef.current = hands
           const vec = extractorRef.current.extract(face, hands, now / 1000)
