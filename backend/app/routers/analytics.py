@@ -8,6 +8,18 @@ from ..models import DetectionEvent, DetectionSession
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 
+# Timestamps this old aren't real -- see EventCreate's validator in
+# schemas.py. New rows can no longer get in, but a database written by an
+# older build can still hold them, and a single one is enough to invent a
+# "1970-01-01" day bucket that then wins "quietest day" outright. Aggregation
+# skips them rather than trusting the data.
+EPOCH_FLOOR = 946684800.0  # 2000-01-01
+
+
+def _is_real_timestamp(ts) -> bool:
+    return isinstance(ts, (int, float)) and ts >= EPOCH_FLOOR
+
+
 def _day_key(ts: float) -> str:
     return datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
 
@@ -34,12 +46,17 @@ def summary(profile_id: str, db: Session = Depends(get_db)):
 
     for e in events:
         by_habit[e.habit] += 1
+        if e.duration_sec:
+            total_duration[e.habit] += e.duration_sec
+        # Habit totals and durations stay honest even for a row with a broken
+        # timestamp; only the time-bucketed views have to drop it, because
+        # there's no defensible day or hour to file it under.
+        if not _is_real_timestamp(e.started_at):
+            continue
         day = _day_key(e.started_at)
         by_day[day][e.habit] += 1
         hour = datetime.datetime.fromtimestamp(e.started_at).hour
         by_hour[hour] += 1
-        if e.duration_sec:
-            total_duration[e.habit] += e.duration_sec
 
     days_sorted = sorted(by_day.keys())
     daily_series = [
@@ -59,6 +76,8 @@ def summary(profile_id: str, db: Session = Depends(get_db)):
     all_sessions = db.query(DetectionSession).filter_by(profile_id=profile_id).all()
     session_days = defaultdict(int)
     for s in all_sessions:
+        if not _is_real_timestamp(s.started_at):
+            continue
         session_days[_day_key(s.started_at)] += 1
     clean_streak = 0
     cursor = datetime.date.today()
