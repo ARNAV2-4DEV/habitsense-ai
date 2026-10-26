@@ -45,7 +45,7 @@ export function useCalibrationCapture() {
         workerRef.current = createDetectionWorkerClient()
       }
       if (!workerRef.current.ready) {
-        await workerRef.current.init({ onProgress: setLoadingMsg })
+        await workerRef.current.init({ onProgress: setLoadingMsg, video: videoRef.current })
       }
       setLoadingMsg(null)
       setReady(true)

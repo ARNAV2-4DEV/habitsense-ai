@@ -222,11 +222,38 @@ export function findNearestContact(face, hands) {
  * on every frame; it internally tracks previous wrist position and dwell time,
  * exactly like the Python extract_features(face, hands, prev_state) does.
  */
+// Lip thinning, measured against the person's OWN resting lips -- mirror of
+// lip_thickness / update_lip_baseline / lip_thinning in features.py. The
+// earlier measure (1 - inner-lip gap / mouth width) read ~0.92 for an
+// ordinary relaxed, closed mouth, the same as a real bite.
+const LIP_THINNING_FULL = 0.4
+const LIP_BASELINE_RISE = 0.2
+const LIP_BASELINE_DRIFT = 0.01
+const LIP_NEAR_REST = 0.85
+
+function lipThickness(face) {
+  const width = Math.max(dist(face[LIP_LEFT_CORNER], face[LIP_RIGHT_CORNER]), 1e-6)
+  const upper = dist(face[LIP_TOP_OUTER], face[LIP_TOP_INNER])
+  const lower = dist(face[LIP_BOTTOM_INNER], face[LIP_BOTTOM_OUTER])
+  return (upper + lower) / width
+}
+
+function updateLipBaseline(baseline, thickness) {
+  if (baseline == null) return thickness
+  if (thickness > baseline) return baseline + LIP_BASELINE_RISE * (thickness - baseline)
+  if (thickness > LIP_NEAR_REST * baseline) return baseline + LIP_BASELINE_DRIFT * (thickness - baseline)
+  return baseline
+}
+
+function lipThinning(baseline, thickness) {
+  return clamp((baseline - thickness) / Math.max(LIP_THINNING_FULL * baseline, 1e-6))
+}
+
 export function createFeatureExtractor() {
-  let state = { prevWrist: null, dwellState: null, dwellStartedAt: null, t: 0 }
+  let state = { prevWrist: null, dwellState: null, dwellStartedAt: null, lipBaseline: null, t: 0 }
 
   function reset() {
-    state = { prevWrist: null, dwellState: null, dwellStartedAt: null, t: 0 }
+    state = { prevWrist: null, dwellState: null, dwellStartedAt: null, lipBaseline: null, t: 0 }
   }
 
   function extract(face, hands, timestampSec) {
@@ -247,9 +274,9 @@ export function createFeatureExtractor() {
     // zeroing these out whenever hands is empty (as an earlier version did)
     // made lip-biting silently undetectable in exactly the situation it's
     // defined by (hands away from the camera).
-    const innerGap = dist(face[LIP_TOP_INNER], face[LIP_BOTTOM_INNER]) / faceW
-    const mouthWidth = Math.max(dist(face[LIP_LEFT_CORNER], face[LIP_RIGHT_CORNER]) / faceW, 1e-6)
-    const mouthCompression = clamp(1.0 - innerGap / Math.max(mouthWidth * 0.6, 1e-6))
+    const thickness = lipThickness(face)
+    state.lipBaseline = updateLipBaseline(state.lipBaseline, thickness)
+    const mouthCompression = lipThinning(state.lipBaseline, thickness)
     const asymmetry = Math.min(Math.abs(face[LIP_LEFT_CORNER].y - face[LIP_RIGHT_CORNER].y) / faceW, 1.0)
 
     const nose = face[NOSE_TIP]

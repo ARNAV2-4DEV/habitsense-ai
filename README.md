@@ -1,8 +1,13 @@
 # HabitSense AI
 
 A real-time, privacy-first computer vision system that notices body-focused
-repetitive behaviors — nail biting, hair pulling, face touching, lip biting —
-as they're happening, and gives a gentle nudge.
+repetitive behaviors (BFRBs) as they're happening, and gives a gentle nudge.
+
+It recognises **9 habits**: nail biting, hair pulling, face touching, lip
+biting, nose picking, eye rubbing, skin picking, chewing on objects, and
+chin/cheek resting (flagged as posture, not a BFRB). Three more are optional,
+off by default and rule-based rather than learned: slouching (camera), teeth
+grinding and knuckle cracking (microphone).
 
 This is a working project with a genuine trainable ML pipeline behind it,
 not a mockup. See **"What's real and what's honestly a proxy"** below before
@@ -15,9 +20,10 @@ You need two terminals (backend + frontend) and Node 18+ / Python 3.10+.
 ```bash
 # Terminal 1 — backend
 cd backend
-python3 -m venv venv && source venv/bin/activate
+python -m venv venv
+source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --port 8000
 
 # Terminal 2 — frontend
 cd frontend
@@ -25,32 +31,33 @@ npm install
 npm run dev
 ```
 
-Open **http://localhost:5173**, grant camera access, and go to **Live
-detection**. For the model to personalize to you, run **Calibrate** first —
-it takes about two minutes per habit.
+Open **http://localhost:5173** in Chrome, grant camera access, and go to
+**Live detection**. For the model to personalize to you, run **Calibrate**
+first: one rep is 6 seconds of the habit plus 4.5 seconds of a neutral pose.
+Record each habit twice so the accuracy score is measured honestly (see below).
+
+Run the model tests from `backend/` with `python -m unittest discover tests`.
 
 ## Architecture
 
 ```
- Webcam ──▶ MediaPipe FaceLandmarker + HandLandmarker  (in-browser, WASM)
+ Webcam ──▶ MediaPipe FaceLandmarker + HandLandmarker   (in the browser, two Web Workers)
               │
               ▼
-        478 face points + 21×N hand points  (never leaves the browser as video)
+        478 face points + 21 points per hand            (video never leaves the tab)
+              │
+              ├──▶ in-browser feature engine (28 numbers) ──▶ calibration samples,
+              │                                              offline rule-based fallback
+              ▼  ~5×/sec, numbers only
+     FastAPI backend on 127.0.0.1
+        28 geometric features ──▶ prior model (synthetic) ┐
+                                  personal model (yours) ─┴▶ blended probabilities, 10 classes
               │
               ▼
-   Geometric feature engine (14 numbers: distances, dwell time, finger curl…)
-              │
-              ├──▶ instant local heuristic (zero latency, always available)
+     Browser: smoothing + threshold + dwell time ──▶ gentle reminder, logged event
               │
               ▼
-     FastAPI backend (localhost) ──▶ scikit-learn RandomForest classifier
-              │                         (bootstrapped from a documented
-              ▼                          synthetic prior, retrained on your
-   SQLite (sessions, events,             real calibration samples)
-   calibration samples)
-              │
-              ▼
-      Analytics dashboard (Recharts) — real aggregation of your own data
+     SQLite (sessions, events, calibration samples) ──▶ Dashboard, JSON/CSV export
 ```
 
 The frontend is React + Vite + Tailwind + Framer Motion, with a Three.js
@@ -60,26 +67,33 @@ The frontend is React + Vite + Tailwind + Framer Motion, with a Three.js
 
 - **The computer vision is 100% real**: Google's production MediaPipe
   FaceLandmarker and HandLandmarker models, run live, unmodified.
-- **The geometric features are real, documented signal**: e.g. nail biting
-  = a fingertip sustained at the mouth with the other fingers curled into a
-  fist. These are the same descriptions a clinician would use.
-- **The classifier is a real, retrainable scikit-learn model** — not a
-  static ruleset dressed up to look like ML. It ships with a synthetic
-  bootstrap dataset (openly documented in `backend/app/ml/seed_data.py`)
-  because no ethically-sourced labeled video dataset of these behaviors was
-  available to train on, and this project has no camera/GPU to record one.
-  The Calibrate flow replaces that synthetic prior with your own real,
-  labeled examples, and the model is genuinely refit — you can watch the
-  cross-validated accuracy change.
-- **Lip biting is disclosed as a weaker signal** than the other three,
-  because it has no hand-to-face geometry to anchor on — it's inferred from
-  mouth shape alone. The UI says so rather than presenting all four as
-  equally confident.
-- **Privacy**: video frames never leave the browser tab. Only small numeric
-  vectors (feature values or raw landmark coordinates — never pixels) are
-  sent to the backend, which runs on your own machine. The only outbound
-  network call to a third party is the one-time download of MediaPipe's
-  model weight files from Google's public CDN.
+- **The geometric features are real, documented signal**: 28 numbers per
+  frame, e.g. nail biting = a fingertip sustained at the mouth with the other
+  fingers curled. The key part is a contact map: which fingertip is closest to
+  which face region (mouth, cheek, jaw, eyebrow/forehead, nose, eye, scalp).
+- **The classifier is a real, retrainable scikit-learn model** (StandardScaler
+  + RandomForest). It ships with a synthetic prior (openly documented in
+  `backend/app/ml/seed_data.py`), because no ethically-sourced labeled video
+  dataset of these behaviors exists. Calibrating trains a second, personal
+  model on your own recordings, and the two are blended — see
+  `backend/app/ml/classifier.py`. Calibrating one habit improves that habit
+  without hurting the ones you haven't calibrated yet.
+- **Accuracy is reported honestly**: the cross-validated score after
+  calibration is computed on your real samples only, and split by recording
+  rep when you have recorded each habit at least twice. The prior scores 100%
+  on its own synthetic data, which says nothing about real use.
+- **Detection is smoothed over time**: the browser averages the last few
+  predictions and only reminds you once a habit stays on top for its dwell
+  time (1.2–2.5 s), so a hand brushing past your face doesn't trigger it.
+- **Weaker signals are disclosed**: lip biting has no hand to measure against
+  (it's inferred from mouth shape alone) and chewing is a coarser pattern, so
+  the UI labels both "moderate confidence". MediaPipe has no hair points, so
+  the scalp region is extrapolated from the forehead and temples.
+- **Privacy**: video frames never leave the browser tab. Only numbers
+  (landmark coordinates or feature vectors — never pixels) are sent to the
+  backend, which runs on your own machine. The only outbound network call to
+  a third party is the one-time download of MediaPipe's model weight files
+  from Google's public CDN.
 
 ## This is a self-awareness tool, not a medical device
 

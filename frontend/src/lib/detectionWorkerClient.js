@@ -36,7 +36,7 @@ function spawnWorker(role) {
         break
       case 'ready':
         ready = true
-        readyWaiters.forEach((w) => w.resolve())
+        readyWaiters.forEach((w) => w.resolve({ delegate: msg.delegate, timings: msg.timings }))
         readyWaiters = []
         break
       case 'result': {
@@ -83,10 +83,11 @@ function spawnWorker(role) {
     get ready() {
       return ready
     },
-    init({ onProgress: cb } = {}) {
+    /** sample (an ImageBitmap) transfers to the worker; resolves with { delegate, timings }. */
+    init({ onProgress: cb, sample = null, delegate = null } = {}) {
       onProgress = cb || onProgress
-      if (ready) return Promise.resolve()
-      worker.postMessage({ type: 'init', role })
+      if (ready) return Promise.resolve({})
+      worker.postMessage({ type: 'init', role, sample, delegate }, sample ? [sample] : [])
       return new Promise((resolve, reject) => readyWaiters.push({ resolve, reject }))
     },
     /** bitmap ownership transfers to the worker -- don't touch it after calling this. */
@@ -106,6 +107,62 @@ function spawnWorker(role) {
 
 let nextRequestId = 1
 
+// GPU-vs-CPU winner per model, cached per graphics chip so the race (which
+// builds each model twice) runs only on the first visit on a given machine.
+const DELEGATE_KEY = 'habitsense_delegate_v1'
+
+function gpuFingerprint() {
+  try {
+    const gl = new OffscreenCanvas(1, 1).getContext('webgl2')
+    const info = gl?.getExtension('WEBGL_debug_renderer_info')
+    return info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : 'no-webgl2'
+  } catch {
+    return 'unknown'
+  }
+}
+
+function loadDelegates() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DELEGATE_KEY))
+    return saved?.gpu === gpuFingerprint() ? saved.roles || {} : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveDelegate(role, delegate) {
+  try {
+    const roles = { ...loadDelegates(), [role]: delegate }
+    localStorage.setItem(DELEGATE_KEY, JSON.stringify({ gpu: gpuFingerprint(), roles }))
+  } catch {
+    /* localStorage unavailable -- the race just runs again next visit */
+  }
+}
+
+async function captureSample(video) {
+  if (!video || video.readyState < 2) return null
+  try {
+    return await createImageBitmap(video)
+  } catch {
+    return null
+  }
+}
+
+/** Starts one worker's model on the cached delegate, or races GPU vs CPU on a real frame. */
+async function initFastest(w, { onProgress, video }) {
+  const cached = loadDelegates()[w.role]
+  const sample = cached ? null : await captureSample(video)
+  const info = await w.init({ onProgress, sample, delegate: cached || null })
+  if (info.timings) {
+    saveDelegate(w.role, info.delegate)
+    console.info(
+      `[mediapipe] ${w.role}: ${info.delegate} (GPU ${info.timings.GPU.toFixed(1)}ms vs CPU ${info.timings.CPU.toFixed(1)}ms)`
+    )
+  } else if (info.delegate) {
+    console.info(`[mediapipe] ${w.role}: ${info.delegate}${cached ? ' (cached choice)' : ''}`)
+  }
+}
+
 export function createDetectionWorkerClient() {
   const face = spawnWorker('face')
   const hand = spawnWorker('hand')
@@ -118,13 +175,14 @@ export function createDetectionWorkerClient() {
     get poseReady() {
       return !!pose?.ready
     },
-    init({ onProgress } = {}) {
+    /** video: the playing camera element, used for the one-time GPU-vs-CPU race. */
+    init({ onProgress, video } = {}) {
       // Both models download and initialise concurrently too, not just infer.
-      return Promise.all([face.init({ onProgress }), hand.init({ onProgress })])
+      return Promise.all([initFastest(face, { onProgress, video }), initFastest(hand, { onProgress, video })])
     },
-    initPose({ onProgress } = {}) {
+    initPose({ onProgress, video } = {}) {
       pose = pose || spawnWorker('pose')
-      return pose.init({ onProgress })
+      return initFastest(pose, { onProgress, video })
     },
     /**
      * Captures one frame per active model and runs them all concurrently.

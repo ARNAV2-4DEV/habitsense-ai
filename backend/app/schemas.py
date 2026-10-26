@@ -1,6 +1,9 @@
 import time
-from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List, Dict
+from pydantic import AfterValidator, BaseModel, Field, field_validator
+from typing import Annotated, Optional, List, Dict
+
+from .ml.features import N_FEATURES
+from .ml.seed_data import HABITS
 
 # Anything before 2000-01-01 in a field that is supposed to hold a unix
 # timestamp is not a clock skew -- it's the wrong clock entirely.
@@ -22,18 +25,48 @@ class InferRequest(BaseModel):
     timestamp: float
 
 
+def _check_vector_length(v: List[float]) -> List[float]:
+    if len(v) != N_FEATURES:
+        raise ValueError(f"feature_vector has {len(v)} values, expected {N_FEATURES}")
+    return v
+
+
+def _check_habit(h: str) -> str:
+    if h not in HABITS:
+        raise ValueError(f"unknown habit {h!r}, expected one of {HABITS}")
+    return h
+
+
+# A feature vector must match the classifier's 28-column schema exactly, and
+# a calibration label must be a class the classifier knows -- rejected with
+# a 422 on the way in instead of a 500 (or a silently skipped row) later.
+FeatureVector = Annotated[List[float], AfterValidator(_check_vector_length)]
+HabitLabel = Annotated[str, AfterValidator(_check_habit)]
+
+
 class FeatureVectorRequest(BaseModel):
     """Alternative to InferRequest for clients that already computed the
     feature vector locally (e.g. the browser's own heuristic engine)."""
     profile_id: str = "default"
-    feature_vector: List[float]
+    feature_vector: FeatureVector
 
 
 class CalibrationSampleIn(BaseModel):
     profile_id: str = "default"
-    habit: str
-    feature_vector: List[float]
+    habit: HabitLabel
+    feature_vector: FeatureVector
     variant: Optional[str] = None  # e.g. "left_thumb" -- user-facing review tag only
+
+
+class CalibrationBatchItem(BaseModel):
+    habit: HabitLabel
+    feature_vector: FeatureVector
+    variant: Optional[str] = None
+
+
+class CalibrationBatchIn(BaseModel):
+    profile_id: str = "default"
+    samples: List[CalibrationBatchItem]
 
 
 class RetrainRequest(BaseModel):
@@ -42,9 +75,7 @@ class RetrainRequest(BaseModel):
 
 class SessionCreate(BaseModel):
     profile_id: str = "default"
-    habits_enabled: List[str] = Field(default_factory=lambda: [
-        "nail_biting", "hair_pulling", "face_touching", "lip_biting"
-    ])
+    habits_enabled: List[str] = Field(default_factory=lambda: [h for h in HABITS if h != "none"])
 
 
 class SessionEnd(BaseModel):

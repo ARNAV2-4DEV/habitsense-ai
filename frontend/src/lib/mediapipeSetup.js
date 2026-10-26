@@ -40,17 +40,50 @@ let visionFileset = null
 // throw (rather than silently downgrading) when GPU init genuinely fails,
 // so this also doubles as a real safety net -- without it, a GPU init
 // failure would previously take down the whole app instead of degrading.
-async function createWithDelegateFallback(create, label) {
+async function createWithDelegateFallback(create, label, preferred = 'GPU') {
   try {
-    const instance = await create('GPU')
-    console.info(`[mediapipe] ${label}: GPU delegate active`)
-    return instance
+    const instance = await create(preferred)
+    return { instance, delegate: preferred }
   } catch (err) {
+    if (preferred === 'CPU') throw err
     console.warn(`[mediapipe] ${label}: GPU delegate failed, falling back to CPU`, err)
-    const instance = await create('CPU')
-    console.info(`[mediapipe] ${label}: CPU delegate active`)
-    return instance
+    return { instance: await create('CPU'), delegate: 'CPU' }
   }
+}
+
+/** Median single-frame inference time on `sample`, after a short warm-up.
+ * Timestamps start at 1 so the real loop's (performance.now()-based)
+ * timestamps are always later, as VIDEO mode requires. */
+function medianInferenceMs(instance, sample) {
+  let ts = 1
+  for (let i = 0; i < 3; i++) instance.detectForVideo(sample, ts++)
+  const times = []
+  for (let i = 0; i < 7; i++) {
+    const start = performance.now()
+    instance.detectForVideo(sample, ts++)
+    times.push(performance.now() - start)
+  }
+  times.sort((a, b) => a - b)
+  return times[3]
+}
+
+/**
+ * GPU is not always the fast path. Measured on a laptop with Intel UHD
+ * integrated graphics and a 32-core CPU: face 55ms GPU vs 44ms CPU, hands
+ * 91ms vs 72ms -- and with both models sharing one weak GPU, a frame took
+ * ~139ms (7fps). So when given a real camera frame, build the model on both
+ * delegates, time them on that frame, and keep the faster. `delegate` skips
+ * the race (the client caches the winner per GPU, see detectionWorkerClient).
+ */
+async function createFastest(create, label, { sample, delegate } = {}) {
+  if (delegate) return createWithDelegateFallback(create, label, delegate)
+  const gpu = await createWithDelegateFallback(create, label, 'GPU')
+  if (!sample || gpu.delegate !== 'GPU') return gpu
+  const cpu = await createWithDelegateFallback(create, label, 'CPU')
+  const timings = { GPU: medianInferenceMs(gpu.instance, sample), CPU: medianInferenceMs(cpu.instance, sample) }
+  const [keep, drop] = timings.CPU < timings.GPU ? [cpu, gpu] : [gpu, cpu]
+  drop.instance.close()
+  return { ...keep, timings }
 }
 
 async function fileset() {
@@ -66,35 +99,37 @@ async function fileset() {
  * two camera frame intervals at 30fps, which is why the detection loop was
  * only managing ~15fps and the overlay trailed the video by ~110ms.
  */
-export async function loadFaceLandmarker({ onProgress } = {}) {
+export async function loadFaceLandmarker({ onProgress, sample, delegate } = {}) {
   onProgress?.('Loading vision runtime…')
   const vision = await fileset()
   onProgress?.('Loading face landmark model…')
-  return createWithDelegateFallback(
-    (delegate) =>
+  return createFastest(
+    (d) =>
       FaceLandmarker.createFromOptions(vision, {
-        baseOptions: { modelAssetPath: FACE_MODEL_URL, delegate },
+        baseOptions: { modelAssetPath: FACE_MODEL_URL, delegate: d },
         runningMode: 'VIDEO',
         numFaces: 1,
         outputFaceBlendshapes: false,
         outputFacialTransformationMatrixes: false,
       }),
-    'FaceLandmarker'
+    'FaceLandmarker',
+    { sample, delegate }
   )
 }
 
-export async function loadHandLandmarker({ onProgress } = {}) {
+export async function loadHandLandmarker({ onProgress, sample, delegate } = {}) {
   onProgress?.('Loading vision runtime…')
   const vision = await fileset()
   onProgress?.('Loading hand landmark model…')
-  return createWithDelegateFallback(
-    (delegate) =>
+  return createFastest(
+    (d) =>
       HandLandmarker.createFromOptions(vision, {
-        baseOptions: { modelAssetPath: HAND_MODEL_URL, delegate },
+        baseOptions: { modelAssetPath: HAND_MODEL_URL, delegate: d },
         runningMode: 'VIDEO',
         numHands: 2,
       }),
-    'HandLandmarker'
+    'HandLandmarker',
+    { sample, delegate }
   )
 }
 
@@ -120,20 +155,21 @@ export function detectHands(handLandmarker, image, timestampMs) {
  */
 let poseLandmarkerPromise = null
 
-export async function loadPoseLandmarker({ onProgress } = {}) {
+export async function loadPoseLandmarker({ onProgress, sample, delegate } = {}) {
   if (!poseLandmarkerPromise) {
     poseLandmarkerPromise = (async () => {
       onProgress?.('Loading vision runtime…')
       const vision = await fileset()
       onProgress?.('Loading posture model…')
-      return createWithDelegateFallback(
-        (delegate) =>
+      return createFastest(
+        (d) =>
           PoseLandmarker.createFromOptions(vision, {
-            baseOptions: { modelAssetPath: POSE_MODEL_URL, delegate },
+            baseOptions: { modelAssetPath: POSE_MODEL_URL, delegate: d },
             runningMode: 'VIDEO',
             numPoses: 1,
           }),
-        'PoseLandmarker'
+        'PoseLandmarker',
+        { sample, delegate }
       )
     })()
   }

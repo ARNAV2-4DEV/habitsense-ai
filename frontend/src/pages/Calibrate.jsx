@@ -160,9 +160,9 @@ export default function Calibrate() {
 
   const commitRep = async (habit, habitVectors, neutralVectors, tag) => {
     setPhase('uploading')
-    await Promise.all([
-      ...habitVectors.map((v) => api.addCalibrationSample(profileId, habit, v, tag)),
-      ...neutralVectors.map((v) => api.addCalibrationSample(profileId, 'none', v)),
+    await api.addCalibrationSamples(profileId, [
+      ...habitVectors.map((v) => ({ habit, feature_vector: v, variant: tag })),
+      ...neutralVectors.map((v) => ({ habit: 'none', feature_vector: v })),
     ])
     bumpRepCount(habit)
     setFailedAttempts((f) => ({ ...f, [habit]: 0 }))
@@ -506,6 +506,13 @@ export default function Calibrate() {
                         {retrainResult.cv_accuracy != null ? `${Math.round(retrainResult.cv_accuracy * 100)}%` : '—'}
                       </span>
                     </div>
+                    {retrainResult.cv_method && (
+                      <p className="text-[11px] text-white/35 leading-relaxed">
+                        {retrainResult.cv_method === 'across reps'
+                          ? 'Tested on recording reps the model never trained on.'
+                          : 'Tested on frames from reps it also trained on, so this is optimistic. Record each habit twice for an honest score.'}
+                      </p>
+                    )}
                   </motion.div>
                 )}
               </AnimatePresence>

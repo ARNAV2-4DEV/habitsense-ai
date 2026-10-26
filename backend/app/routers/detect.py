@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from ..schemas import InferRequest, FeatureVectorRequest
 from ..ml.features import extract_features, FEATURE_NAMES
 from ..ml.classifier import get_classifier
+from ..ml.seed_data import HABITS
 
 router = APIRouter(prefix="/detect", tags=["detect"])
 
@@ -26,13 +27,25 @@ def infer(req: InferRequest):
     classifier probabilities. This is the endpoint the live detection loop
     calls every ~150-250ms while the camera is on.
     """
-    face = [p.dict() for p in req.face] if req.face else None
-    hands = [[p.dict() for p in h] for h in req.hands]
+    face = [p.model_dump() for p in req.face] if req.face else None
+    hands = [[p.model_dump() for p in h] for h in req.hands]
 
     state = _state_for(req.session_id)
     state["t"] = req.timestamp
     vec, new_state = extract_features(face, hands, state)
     _SESSION_STATE[req.session_id or "anonymous"] = new_state
+
+    if face is None:
+        # Every habit is defined relative to the face, so with no face
+        # tracked there is nothing to judge -- say "none" outright rather
+        # than asking the classifier about an all-zero vector.
+        return {
+            "probabilities": {h: (1.0 if h == "none" else 0.0) for h in HABITS},
+            "top_label": "none",
+            "top_confidence": 1.0,
+            "face_detected": False,
+            "feature_vector": vec,
+        }
 
     clf = get_classifier(req.profile_id)
     result = clf.predict(vec)

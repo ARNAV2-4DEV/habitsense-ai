@@ -109,10 +109,10 @@ export default function About() {
 
         <Section title="What actually leaves your device">
           <p>
-            Video frames never leave your browser tab. What does get sent, over your own local
-            network to the backend running on your own machine, is the small numeric feature
-            vector (14 floats) or, for the full pipeline, the raw landmark coordinates (a few
-            hundred x/y/z numbers) — never an image or video frame. That backend is code you're
+            Video frames never leave your browser tab. What does get sent, to the backend running
+            on this same computer (127.0.0.1), is numbers only: during live detection, the
+            landmark coordinates (a few hundred x/y/z values per frame); during calibration, the
+            28-number feature vectors — never an image or video frame. That backend is code you're
             running yourself; nothing is sent to Anthropic, Google, or any third-party server
             except the one-time download of the pretrained model weight files from Google's
             public model CDN.

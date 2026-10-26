@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import CalibrationSample
-from ..schemas import CalibrationSampleIn, RetrainRequest
-from ..ml.classifier import get_classifier
+from ..schemas import CalibrationSampleIn, CalibrationBatchIn, RetrainRequest
+from ..ml.classifier import get_classifier, groups_from_timestamps
 
 router = APIRouter(prefix="/calibration", tags=["calibration"])
 
@@ -21,6 +21,24 @@ def add_sample(sample: CalibrationSampleIn, db: Session = Depends(get_db)):
     db.refresh(row)
     count = db.query(CalibrationSample).filter_by(profile_id=sample.profile_id).count()
     return {"id": row.id, "total_samples_for_profile": count}
+
+
+@router.post("/samples/batch")
+def add_samples_batch(batch: CalibrationBatchIn, db: Session = Depends(get_db)):
+    """One calibration rep (~70 vectors) in a single request and a single
+    transaction, instead of ~70 separate POSTs."""
+    db.add_all([
+        CalibrationSample(
+            profile_id=batch.profile_id,
+            habit=s.habit,
+            feature_vector=s.feature_vector,
+            variant=s.variant,
+        )
+        for s in batch.samples
+    ])
+    db.commit()
+    count = db.query(CalibrationSample).filter_by(profile_id=batch.profile_id).count()
+    return {"added": len(batch.samples), "total_samples_for_profile": count}
 
 
 @router.get("/samples/{profile_id}")
@@ -47,8 +65,9 @@ def clear_samples(profile_id: str, db: Session = Depends(get_db)):
 def retrain(req: RetrainRequest, db: Session = Depends(get_db)):
     rows = db.query(CalibrationSample).filter_by(profile_id=req.profile_id).all()
     real_samples = [(r.feature_vector, r.habit) for r in rows]
+    groups = groups_from_timestamps([r.created_at for r in rows])
     clf = get_classifier(req.profile_id)
-    clf.retrain(real_samples)
+    clf.retrain(real_samples, groups)
     return clf.status()
 
 

@@ -1,6 +1,6 @@
 """
 Turns a single frame of raw MediaPipe landmarks (face + hands) into the fixed
-26-dimensional feature vector HabitClassifier is trained on.
+28-dimensional feature vector HabitClassifier is trained on.
 
 v2: in addition to the original coarse distance signals, this version tracks
 *which specific fingertip* (thumb/index/middle/ring/pinky) is closest to
@@ -33,7 +33,8 @@ FEATURE_NAMES = [
     "min_fingertip_to_face_dist",       # closest fingertip to nose region (general "face touch"), /face_width
     "hand_above_forehead",              # 1.0 if wrist is above the forehead landmark, else 0.0
     "hand_height_norm",                 # wrist height relative to face, normalized
-    "mouth_compression_ratio",          # inner-lip gap / mouth width -> shrinks when lips are pressed/bitten
+    "mouth_compression_ratio",          # how much thinner the visible lips are than this person's own resting
+                                         # lips: 0 = relaxed, 1 = 40%+ thinner (lips bitten / rolled in)
     "mouth_asymmetry",                  # |left corner y - right corner y| / face_width -> lip-biting tends to pull one side
     "finger_curl_score",                # 0 = fingers extended, 1 = curled into a fist (typical nail-biting hand shape)
     "thumb_or_index_isolated",          # 1.0 if exactly one of thumb/index is far more extended than the rest (finger-to-mouth posture)
@@ -143,12 +144,47 @@ def _pinch_grip(hand):
     return pinch_component * curl_component
 
 
+# Lip thinning, measured against the person's OWN resting lips. The earlier
+# measure (1 - inner-lip gap / mouth width) read ~0.92 for an ordinary
+# relaxed, closed mouth -- the same as a real bite -- so "mouth closed, hands
+# down" was classified as lip biting. Visible lip thickness (outer to inner
+# contour, upper + lower) is what actually shrinks when lips are bitten or
+# rolled in, and it varies a lot between people, hence the baseline.
+LIP_THINNING_FULL = 0.4      # 40% thinner than resting reads as fully compressed (1.0)
+LIP_BASELINE_RISE = 0.2      # baseline follows fuller lips quickly...
+LIP_BASELINE_DRIFT = 0.01    # ...and drifts down slowly, only while near resting
+LIP_NEAR_REST = 0.85         # thinner than this fraction of baseline = possibly biting: baseline frozen
+
+
+def lip_thickness(face):
+    """Upper + lower visible lip thickness, as a fraction of mouth width."""
+    width = max(L.dist(face[L.LIP_LEFT_CORNER], face[L.LIP_RIGHT_CORNER]), 1e-6)
+    upper = L.dist(face[L.LIP_TOP_OUTER], face[L.LIP_TOP_INNER])
+    lower = L.dist(face[L.LIP_BOTTOM_INNER], face[L.LIP_BOTTOM_OUTER])
+    return (upper + lower) / width
+
+
+def update_lip_baseline(baseline, thickness):
+    if baseline is None:
+        return thickness
+    if thickness > baseline:
+        return baseline + LIP_BASELINE_RISE * (thickness - baseline)
+    if thickness > LIP_NEAR_REST * baseline:
+        return baseline + LIP_BASELINE_DRIFT * (thickness - baseline)
+    return baseline
+
+
+def lip_thinning(baseline, thickness):
+    return max(0.0, min(1.0, (baseline - thickness) / max(LIP_THINNING_FULL * baseline, 1e-6)))
+
+
 def extract_features(face, hands, prev_state):
     """
     face: list of 478 {x,y,z} dicts, normalized image coordinates (0..1), or None
     hands: list of hand landmark lists (each 21 {x,y,z} dicts), 0-2 hands
     prev_state: dict carried between frames for this session, holding at least
         {"prev_wrist": {...} | None, "dwell_state": str | None, "dwell_started_at": float | None, "t": float}
+        and, once a face has been seen, "lip_baseline" (this person's resting lip thickness)
         The API layer is responsible for persisting/passing this per session.
 
     Returns (feature_vector: list[float] length N_FEATURES, new_state: dict)
@@ -170,9 +206,9 @@ def extract_features(face, hands, prev_state):
     # zeroing these out whenever hands==[] (as an earlier version did) made
     # lip-biting silently undetectable in exactly the situation it's defined
     # by (hands away from the camera).
-    inner_gap = L.dist(face[L.LIP_TOP_INNER], face[L.LIP_BOTTOM_INNER]) / face_w
-    mouth_width = max(L.dist(face[L.LIP_LEFT_CORNER], face[L.LIP_RIGHT_CORNER]) / face_w, 1e-6)
-    mouth_compression = max(0.0, min(1.0, 1.0 - (inner_gap / max(mouth_width * 0.6, 1e-6))))
+    thickness = lip_thickness(face)
+    lip_baseline = update_lip_baseline(prev_state.get("lip_baseline"), thickness)
+    mouth_compression = lip_thinning(lip_baseline, thickness)
     asymmetry = abs(face[L.LIP_LEFT_CORNER]["y"] - face[L.LIP_RIGHT_CORNER]["y"]) / face_w
 
     nose_pt = face[L.NOSE_TIP]
@@ -305,6 +341,7 @@ def extract_features(face, hands, prev_state):
         "prev_wrist": best_wrist if best_wrist is not None else prev_state.get("prev_wrist"),
         "dwell_state": dwell_state,
         "dwell_started_at": dwell_started_at,
+        "lip_baseline": lip_baseline,
         "t": now,
     }
     return vec, new_state

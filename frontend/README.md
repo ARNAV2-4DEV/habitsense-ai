@@ -42,11 +42,19 @@ npm run preview # serve the production build locally
 src/
   lib/
     mediapipeSetup.js      # loads Google's real pretrained CV models
-    featureExtraction.js   # JS mirror of the backend's geometric features
+    detectionWorkerClient.js # runs face + hand models in two parallel Web Workers
+    featureExtraction.js   # JS mirror of the backend's 28 geometric features
+    qualityGates.js        # rejects bad calibration reps before upload
+    oneEuroFilter.js       # smooths the on-screen skeleton (display only)
+    postureFeatures.js     # opt-in slouch detection (rule-based)
+    audioDetection.js      # opt-in teeth grinding / knuckle cracking (rule-based)
+    consent.js             # explicit camera/mic consent gate
     api.js                 # backend client
     chime.js               # Web Audio gentle notification sound
+  workers/
+    mediapipeWorker.js     # one MediaPipe model per worker thread
   hooks/
-    useDetectionEngine.js  # webcam → landmarks → features → backend → events
+    useDetectionEngine.js  # webcam → landmarks → backend → smoothing + dwell → events
     useCalibrationCapture.js
   state/store.js           # Zustand: settings + live session state
   components/

@@ -59,10 +59,11 @@ export const api = {
       body: JSON.stringify({ event_id: eventId, notes }),
     }),
 
-  addCalibrationSample: (profileId, habit, featureVector, variant = null) =>
-    request('/calibration/samples', {
+  // One request per calibration rep. samples: [{ habit, feature_vector, variant }]
+  addCalibrationSamples: (profileId, samples) =>
+    request('/calibration/samples/batch', {
       method: 'POST',
-      body: JSON.stringify({ profile_id: profileId, habit, feature_vector: featureVector, variant }),
+      body: JSON.stringify({ profile_id: profileId, samples }),
     }),
 
   calibrationSummary: (profileId) => request(`/calibration/samples/${profileId}`),

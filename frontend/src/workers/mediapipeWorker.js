@@ -74,10 +74,14 @@ self.onmessage = async (event) => {
   try {
     if (msg.type === 'init') {
       role = msg.role
-      landmarker = await LOADERS[role]({
+      const { instance, delegate, timings } = await LOADERS[role]({
         onProgress: (message) => self.postMessage({ type: 'progress', message }),
+        sample: msg.sample, // a real camera frame to race GPU vs CPU on, or null
+        delegate: msg.delegate, // a cached winner, which skips the race
       })
-      self.postMessage({ type: 'ready', role })
+      msg.sample?.close()
+      landmarker = instance
+      self.postMessage({ type: 'ready', role, delegate, timings })
     } else if (msg.type === 'detect') {
       const { requestId, bitmap, timestampMs } = msg
       let payload

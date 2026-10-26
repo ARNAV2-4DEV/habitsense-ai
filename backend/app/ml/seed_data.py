@@ -79,14 +79,14 @@ def _sample_none():
     v[IDX["min_fingertip_to_face_dist"]] = _noisy(0.5, 0.22, 0.28, 1.0)
     v[IDX["hand_above_forehead"]] = 0.0
     v[IDX["hand_height_norm"]] = _noisy(0.15, 0.1, 0.0, 0.4)
+    # mouth_compression_ratio is lip THINNING relative to the person's own
+    # resting lips (see features.lip_thinning): a relaxed mouth reads ~0.
     # A meaningful fraction of "none" moments are a smile or a mid-word
-    # bilabial consonant caught in a single frame -- both can momentarily
-    # compress the mouth almost as much as an actual bite (verified
-    # directly: a closed-lip smile measures ~0.86 here, a bilabial
-    # consonant ~0.87, vs. a real bite's ~0.92-0.93 -- not a clean gap).
-    # What actually separates them is that they never SUSTAIN, so this
-    # hard negative pairs high compression with zero dwell, teaching the
-    # classifier that compression alone isn't enough evidence.
+    # bilabial consonant caught in a single frame -- both stretch or press
+    # the lips thin for a moment, much like a bite. What actually separates
+    # them is that they never SUSTAIN, so this hard negative pairs high
+    # compression with zero dwell, teaching the classifier that compression
+    # alone isn't enough evidence.
     if random.random() < 0.3:
         v[IDX["mouth_compression_ratio"]] = _noisy(0.75, 0.15, 0.5, 1.0)
         v[IDX["mouth_asymmetry"]] = _noisy(0.1, 0.08)

@@ -10,6 +10,36 @@ import { scheduleVideoFrameLoop, cancelVideoFrameLoop, scheduleImmediate } from 
 
 const BACKEND_POLL_MS = 200 // ~5 calls/sec to the local classifier — plenty for dwell-smoothed detection
 
+// Exponential moving average over successive classifier outputs. The
+// classifier judges one frame at a time, and a single off frame used to
+// reset a habit's dwell timer -- at a ~65% per-frame hit rate, the 9
+// consecutive hits a 1.8s dwell needs almost never happened. 0.4 at ~5Hz
+// keeps about half a second of memory: steady enough to ride out a flicker,
+// quick enough that the reminder isn't noticeably delayed.
+const SMOOTHING_ALPHA = 0.4
+const MAX_CLASSIFY_GAP_SEC = 0.5 // cap on the dwell credit one response can add (e.g. after a stall)
+
+function smoothProbabilities(prev, next, alpha) {
+  if (!prev) return { ...next }
+  const out = {}
+  for (const k of new Set([...Object.keys(prev), ...Object.keys(next)])) {
+    out[k] = alpha * (next[k] ?? 0) + (1 - alpha) * (prev[k] ?? 0)
+  }
+  return out
+}
+
+function topOf(probs) {
+  let label = 'none'
+  let best = -1
+  for (const [k, v] of Object.entries(probs)) {
+    if (v > best) {
+      best = v
+      label = k
+    }
+  }
+  return { label, confidence: Math.max(best, 0) }
+}
+
 export function useDetectionEngine() {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
@@ -26,6 +56,13 @@ export function useDetectionEngine() {
   const workerRef = useRef(null)
   const extractorRef = useRef(createFeatureExtractor())
   const lastBackendCallRef = useRef(0)
+  // Responses are fire-and-forget and can land out of order: each request
+  // gets a sequence number and anything older than the newest applied one
+  // is dropped, so a slow stale answer can't overwrite a newer one.
+  const requestSeqRef = useRef(0)
+  const appliedSeqRef = useRef(0)
+  const smoothedProbsRef = useRef(null)
+  const lastClassifiedAtRef = useRef(null)
   const openEventsRef = useRef({}) // habit -> { startedAt, maxConfidence }
   const activeStreakRef = useRef({}) // habit -> seconds sustained above threshold this "bout"
   const lastFrameTimeRef = useRef(performance.now())
@@ -131,11 +168,11 @@ export function useDetectionEngine() {
         workerRef.current = createDetectionWorkerClient()
       }
       if (!workerRef.current.ready) {
-        await workerRef.current.init({ onProgress: setLoadingMsg })
+        await workerRef.current.init({ onProgress: setLoadingMsg, video: videoRef.current })
       }
 
       if (useStore.getState().posture.enabled && !workerRef.current.poseReady) {
-        await workerRef.current.initPose({ onProgress: setLoadingMsg })
+        await workerRef.current.initPose({ onProgress: setLoadingMsg, video: videoRef.current })
       }
       postureMonitorRef.current.reset()
       setPostureStatus(null)
@@ -168,6 +205,9 @@ export function useDetectionEngine() {
       api.modelStatus(useStore.getState().profileId).then(useStore.getState().setModelInfo).catch(() => {})
 
       extractorRef.current.reset()
+      smoothedProbsRef.current = null
+      lastClassifiedAtRef.current = null
+      appliedSeqRef.current = requestSeqRef.current
       openEventsRef.current = {}
       activeStreakRef.current = {}
       lastFrameTimeRef.current = performance.now()
@@ -279,15 +319,31 @@ export function useDetectionEngine() {
   )
 
   const handleClassification = useCallback(
-    (result, dtSec) => {
+    (result, seq) => {
+      if (seq <= appliedSeqRef.current) return // stale: a newer response already landed
+      appliedSeqRef.current = seq
+
+      // Dwell credit = real time since the previous applied response, not
+      // the nominal poll interval (responses don't arrive exactly 200ms apart).
+      const nowMs = performance.now()
+      const dtSec =
+        lastClassifiedAtRef.current == null
+          ? BACKEND_POLL_MS / 1000
+          : Math.min((nowMs - lastClassifiedAtRef.current) / 1000, MAX_CLASSIFY_GAP_SEC)
+      lastClassifiedAtRef.current = nowMs
+
+      const probs = smoothProbabilities(smoothedProbsRef.current, result.probabilities || {}, SMOOTHING_ALPHA)
+      smoothedProbsRef.current = probs
+      const top = topOf(probs)
+
       const s = useStore.getState()
-      useStore.getState().setCurrentDetection(result.top_label, result.top_confidence)
-      setLatestProbabilities(result.probabilities)
+      s.setCurrentDetection(top.label, top.confidence)
+      setLatestProbabilities(probs)
 
       for (const habit of Object.keys(s.enabledHabits)) {
         if (!s.enabledHabits[habit]) continue
-        const prob = result.probabilities?.[habit] ?? 0
-        const above = prob >= s.thresholds[habit] && result.top_label === habit
+        const prob = probs[habit] ?? 0
+        const above = prob >= s.thresholds[habit] && top.label === habit
         updateStreak(habit, above, dtSec, s.minDwellSeconds[habit], prob)
       }
     },
@@ -435,6 +491,7 @@ export function useDetectionEngine() {
       if (now - lastBackendCallRef.current > BACKEND_POLL_MS) {
         lastBackendCallRef.current = now
         const sid = useStore.getState().sessionId
+        const seq = ++requestSeqRef.current
         api
           .infer({
             profile_id: useStore.getState().profileId,
@@ -443,8 +500,11 @@ export function useDetectionEngine() {
             hands: hands.map((h) => h.map((p) => ({ x: p.x, y: p.y, z: p.z }))),
             timestamp: now / 1000,
           })
-          .then((result) => handleClassification(result, BACKEND_POLL_MS / 1000))
+          .then((result) => {
+            if (runId === runIdRef.current) handleClassification(result, seq)
+          })
           .catch(() => {
+            if (runId !== runIdRef.current) return
             const guess = heuristicGuess(localVec)
             handleClassification(
               {
@@ -452,7 +512,7 @@ export function useDetectionEngine() {
                 top_confidence: guess.confidence,
                 probabilities: { [guess.label]: guess.confidence },
               },
-              BACKEND_POLL_MS / 1000
+              seq
             )
           })
       }

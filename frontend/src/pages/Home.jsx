@@ -35,7 +35,7 @@ const STEPS = [
   {
     n: '02',
     title: 'A geometry engine turns points into meaning',
-    body: 'Fingertip-to-mouth distance, dwell time, finger curl, hand height — fourteen engineered signals per frame, the same ones a clinician would describe out loud.',
+    body: 'Fingertip-to-mouth distance, dwell time, finger curl, which finger is touching which part of the face — 28 engineered signals per frame, the same ones a clinician would describe out loud.',
   },
   {
     n: '03',
